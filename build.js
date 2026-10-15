@@ -6,7 +6,7 @@ const REG = window.KVReg = window.KVReg || { screens: {}, acts: {}, ins: {}, hoo
 const A = () => window.KVApp;
 const CAT = window.KV_CATALOG || { trending: [], cats: [] };
 const PB = () => window.PLAYBOOK || { core: '', types: {}, blocks: '', full: '' };
-const BS = { view: 'catalog', q: '', cat: 'all', topic: '', level: 'Beginner', depth: 'standard', research: true, modelKey: 'auto', job: null, last: null };
+const BS = { view: 'catalog', q: '', cat: 'all', topic: '', level: 'Beginner', depth: 'standard', research: true, modelKey: 'auto', stall: 'offer', job: null, last: null };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /* ---------------- Models ---------------- */
@@ -114,6 +114,7 @@ function setupView() {
       <div class="field"><label>How deep?</label>${segs('b-depth', BS.depth, [['short', 'Short'], ['standard', 'Standard'], ['deep', 'Deep']])}<p class="help">${esc(DEPTH[BS.depth].hint)}${BS.depth === 'standard' ? ' <b>Recommended.</b>' : ''} Amani decides the exact number of modules and lessons from the subject.</p></div>
       ${researchPanel()}</section>
     <section class="pn-strong psec kv-in" style="--d:2"><h2>Which model should build it?</h2>${noModel ? `<div class="verdict pn-strong"><h3>Connect a model first</h3><p>Amani needs a model to write the course. A free cloud model takes a few minutes to set up.</p><div class="row-actions"><button class="btn primary" data-act="nav" data-r="me">Set up a model</button></div></div>` : `<div class="mlist" role="radiogroup">${auto}${rows}</div>
+      <div class="field" style="margin-top:14px"><label>If a model gets slow or busy</label>${segs('b-stall', BS.stall, [['offer', 'Offer me a switch'], ['wait', 'Keep waiting']])}<p class="help">${BS.stall === 'offer' ? 'Amani shows a 15 second countdown and then switches to the next best model by herself, handing over the full plan and progress. You can say no.' : 'Amani waits and retries the same model. Nothing switches unless the key stops working.'}</p></div>
       <p class="help">Estimated time with ${esc(cur.label)}: <b>${estimate(cur, n)}</b>, depending on how many lessons the subject needs. Keep Knowvia open while it builds. You can use other screens meanwhile.</p>`}</section>
     ${knowBox()}
     <div class="row-actions kv-in" style="--d:4"><button class="btn primary" data-act="b-start" ${noModel ? 'disabled' : ''}>${a.ic(a.I.spark, 18, 2)}Build my course</button></div></div>`;
@@ -125,9 +126,24 @@ function runView() {
     <section class="runcard pn-strong kv-in" style="--d:1"><div class="ring" aria-hidden="true"><svg viewBox="0 0 120 120"><circle class="rt" cx="60" cy="60" r="52"/><circle class="rp" id="r-arc" cx="60" cy="60" r="52"/></svg><span id="r-pct">${j.pct}%</span></div>
       <div class="grow"><p class="r-msg" id="r-msg" role="status">${esc(j.msg)}</p><p class="help" id="r-sub">${esc(j.sub || '')}</p><div class="bar" aria-hidden="true"><i id="r-bar" style="width:${j.pct}%"></i></div></div></section>
     <section class="pn-strong psec kv-in" style="--d:2"><ul class="stages" id="r-stages">${stagesHtml(j)}</ul></section>
+    <section class="pn-strong psec health kv-in" style="--d:3" id="r-health" aria-live="off">${healthHtml(j)}</section>
     <p class="help" id="r-note">${esc(j.note || 'Keep Knowvia open while it builds.')}</p>
     ${j.research && j.research.sources.length ? `<p class="meta" id="r-src">${j.research.sources.length} sources found${j.research.videos ? ', ' + j.research.videos + ' videos checked' : ''}.</p>` : ''}
     <div class="row-actions"><button class="btn" data-act="b-bg">Keep working while it builds</button><button class="btn" data-act="b-cancel">Stop</button></div></div>`;
+}
+const HEALTH = { ok: ['ok', 'Working well'], slow: ['warn', 'Slow'], busy: ['warn', 'Model busy'], offline: ['bad', 'No internet'], ask: ['warn', 'Waiting for your choice'] };
+const TIP = { slow: 'A slow answer is usually the provider being busy. A switch often fixes it.', busy: 'Free models allow only so much per minute. Waiting a little, or another model, fixes it.', offline: 'Your work is kept. Amani continues the moment the internet is back.', ask: 'No reply means the switch happens by itself when the countdown ends.' };
+function etaText(j) {
+  const el = Date.now() - j.t0; if (!j.running || j.pct < 12 || el < 60000) return '';
+  const m = el * (100 - j.pct) / j.pct / 60000;
+  return 'About ' + (m < 1 ? 'a minute' : m < 60 ? Math.round(m) + ' minutes' : (Math.round(m / 6) / 10) + ' hours') + ' left at this speed.';
+}
+function healthHtml(j) {
+  const h = HEALTH[j.health] || HEALTH.ok, a = A(), used = Array.from(j.used);
+  const ev = j.events.slice(-3).reverse().map((e) => `<li>${esc(e.x)}</li>`).join('');
+  return `<div class="hl-top"><span class="hl-chip ${h[0]}"><i></i>${h[1]}</span><span class="hl-live" id="r-live">${esc(liveText(j))}</span></div>
+    <p class="help hl-line"><b>${esc(j.modelLabel)}</b> is writing.${j.handoffs.length ? ' It continues the work of ' + esc(used.slice(0, -1).join(', ')) + ', with the full plan handed over.' : ''}${etaText(j) ? ' ' + esc(etaText(j)) : ''}</p>
+    ${TIP[j.health] ? `<p class="help hl-tip">${esc(TIP[j.health])}</p>` : ''}${ev ? `<ul class="hl-ev">${ev}</ul>` : ''}`;
 }
 function stagesHtml(j) {
   const order = STAGES.map((s) => s[0]), cur = order.indexOf(j.step), a = A();
@@ -140,7 +156,7 @@ function doneView() {
     <div class="grid3 kv-in" style="--d:2"><div class="stat raised"><b>${j.lessonsN}</b><span>Lessons</span></div><div class="stat raised"><b>${p.quiz.length}</b><span>Questions</span></div><div class="stat raised"><b>${p.flashcards.length}</b><span>Flashcards</span></div></div>
     <section class="pn-strong psec kv-in" style="--d:2"><h2>How it was made</h2><p class="help">${p.quality.researched ? `Researched on the web: <b>${p.quality.sources}</b> sources, <b>${p.quality.videos || 0}</b> verified videos, about ${j.research.credits} search credits used.` : p.quality.researchMode === 'wiki' ? 'Light research only (Wikipedia).' : '<b>Not researched.</b> Written from the model\'s own knowledge. Set up web research to get sourced courses.'} Open Sources in the course to see the details.</p></section>
     <section class="pn-strong psec kv-in" style="--d:3"><h2>Quality check ${g.score !== undefined ? `<span class="gscore ${g.passed ? 'ok' : 'warn'}">${g.score}%</span>` : ''}</h2>
-      <p class="help">${g.passed ? 'It passed the structure checks.' : 'It did not pass every structure check.'} It was built by ${esc(j.modelLabel)} from its own knowledge and has not been reviewed by a person.</p>
+      <p class="help">${g.passed ? 'It passed the structure checks.' : 'It did not pass every structure check.'} It was built by ${esc(Array.from(j.used).join(' and '))} and has not been reviewed by a person.${j.handoffs.length ? ' The model changed ' + j.handoffs.length + ' time' + (j.handoffs.length > 1 ? 's' : '') + ' along the way (' + j.handoffs.map((h) => esc(String(h.at || 'building').toLowerCase()) + ': ' + esc(h.from) + ' to ' + esc(h.to)).join('; ') + '), each time with the full plan handed over.' : ''}</p>
       ${g.notes && g.notes.length ? `<ul class="gnotes">${g.notes.slice(0, 6).map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}</section>
     <div class="row-actions kv-in" style="--d:4"><button class="btn primary" data-act="b-open">${a.ic(a.I.book, 18, 2)}Start the course</button><button class="btn" data-act="b-more">Back to courses</button></div></div>`;
 }
@@ -173,16 +189,56 @@ function paint() {
     set('#r-pct', j.pct + '%'); set('#r-msg', j.msg); set('#r-sub', j.sub || ''); set('#r-note', j.note || 'Keep Knowvia open while it builds.');
     const bar = a.$('#r-bar'); if (bar) bar.style.width = j.pct + '%';
     const st = a.$('#r-stages'); if (st) st.innerHTML = stagesHtml(j);
+    const hl = a.$('#r-health'); if (hl) hl.innerHTML = healthHtml(j);
     if (j.running && !a.$('#r-msg') && !paint.busy) { paint.busy = true; try { a.renderScreen(); } finally { paint.busy = false; } }
   }
   pill();
 }
+const POSK = 'kv.bpill';
+try { BS.pos = JSON.parse(localStorage.getItem(POSK) || 'null'); } catch (e) { BS.pos = null; }
+function placePill(el) {
+  const p = BS.pos;
+  if (!p) { el.classList.remove('moved'); el.style.left = el.style.top = el.style.bottom = el.style.right = el.style.margin = el.style.transform = ''; return; }
+  const w = el.offsetWidth, h = el.offsetHeight, vw = window.innerWidth, vh = window.innerHeight;
+  el.classList.add('moved');
+  el.style.left = Math.min(Math.max(6, p.x * (vw - w)), Math.max(6, vw - w - 6)) + 'px'; el.style.top = Math.min(Math.max(6, p.y * (vh - h)), Math.max(6, vh - h - 6)) + 'px'; el.style.bottom = 'auto'; el.style.right = 'auto'; el.style.margin = '0'; el.style.transform = 'none';
+}
+function dragPill(el) {
+  el.addEventListener('pointerdown', (e) => {
+    if (e.button > 0) return;
+    const r = el.getBoundingClientRect(), sx = e.clientX, sy = e.clientY, ox = r.left, oy = r.top; let moved = false;
+    try { el.setPointerCapture(e.pointerId); } catch (x) { /* ignore */ }
+    const mv = (ev) => {
+      const dx = ev.clientX - sx, dy = ev.clientY - sy; if (!moved && Math.hypot(dx, dy) < 7) return;
+      if (!moved) { moved = true; el.classList.add('drag'); }
+      const w = el.offsetWidth, h = el.offsetHeight, vw = window.innerWidth, vh = window.innerHeight;
+      const x = Math.min(Math.max(6, ox + dx), Math.max(6, vw - w - 6)), y = Math.min(Math.max(6, oy + dy), Math.max(6, vh - h - 6));
+      el.classList.add('moved'); el.style.left = x + 'px'; el.style.top = y + 'px'; el.style.bottom = 'auto'; el.style.right = 'auto'; el.style.margin = '0'; el.style.transform = 'none';
+      BS.pos = { x: vw - w > 0 ? x / (vw - w) : 0, y: vh - h > 0 ? y / (vh - h) : 0 };
+    };
+    const up = () => {
+      el.removeEventListener('pointermove', mv); el.removeEventListener('pointerup', up); el.removeEventListener('pointercancel', up); el.classList.remove('drag');
+      if (moved) { el._dragged = true; setTimeout(() => { el._dragged = false; }, 60); try { localStorage.setItem(POSK, JSON.stringify(BS.pos)); } catch (x) { /* ignore */ } }
+    };
+    el.addEventListener('pointermove', mv); el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
+  });
+  el.addEventListener('click', (ev) => { if (el._dragged) { ev.stopImmediatePropagation(); ev.preventDefault(); } }, true);
+  el.addEventListener('dblclick', (ev) => { ev.preventDefault(); BS.pos = null; try { localStorage.removeItem(POSK); } catch (x) { /* ignore */ } placePill(el); });
+}
+window.addEventListener('resize', () => { const el = document.getElementById('bpill'); if (el && BS.pos) placePill(el); });
 function pill() {
   const a = A(), j = BS.job; let el = document.getElementById('bpill');
   const show = j && (j.running || (j.done && !j.seen)) && a.route.name !== 'build';
   if (!show) { if (el) el.remove(); return; }
-  if (!el) { el = document.createElement('button'); el.id = 'bpill'; el.className = 'bpill pn-strong'; el.setAttribute('data-act', 'nav'); el.setAttribute('data-r', 'build'); document.body.appendChild(el); }
-  el.innerHTML = j.running ? `<span class="spin"></span><span><b>Building</b> ${esc(j.topic.slice(0, 28))}<span class="s"> ${j.pct}%</span></span>` : `<span class="okdot"></span><span><b>Course ready</b> ${esc(j.topic.slice(0, 28))}</span>`;
+  if (!el) {
+    el = document.createElement('button'); el.id = 'bpill'; el.className = 'bpill pn-strong'; el.setAttribute('data-act', 'nav'); el.setAttribute('data-r', 'build'); el.setAttribute('aria-label', 'Course building. Tap to open. Drag to move. Double tap to put it back.'); document.body.appendChild(el); dragPill(el);
+    let seen = 0; try { seen = +localStorage.getItem('kv.bpillhint') || 0; } catch (x) { /* ignore */ }
+    if (!seen) { try { localStorage.setItem('kv.bpillhint', '1'); } catch (x) { /* ignore */ } setTimeout(() => a.toast('Tip: drag the bubble anywhere. Double tap it to put it back.'), 600); }
+  }
+  const warn = j.running && j.health && j.health !== 'ok', tag = warn ? ({ slow: 'slow', busy: 'busy', offline: 'offline', ask: 'your choice' })[j.health] : '';
+  el.classList.toggle('warn', !!warn);
+  el.innerHTML = j.running ? `<span class="grip" aria-hidden="true"></span><span class="spin"></span><span class="bt"><b>Building</b><span class="bn">${esc(j.topic)}</span><span class="s">${tag ? tag : j.pct + '%'}</span></span>` : `<span class="grip" aria-hidden="true"></span><span class="okdot"></span><span class="bt"><b>Course ready</b><span class="bn">${esc(j.topic)}</span></span>`;
+  placePill(el);
 }
 REG.hooks.afterScreen = ((prev) => (name) => { if (prev) prev(name); if (name === 'build') { const j = BS.job; if (j && j.done) j.seen = true; paint(); } else pill(); })(REG.hooks.afterScreen);
 window.KVBuild = { running() { const j = BS.job; return j && j.running ? { title: j.topic, pct: j.pct } : null; } };
@@ -204,23 +260,142 @@ async function waitOnline(j) {
   }
   return false;
 }
-function nextModel(j) {
-  const list = choices().filter((c) => !j.failed.has(keyOf(c))); if (!list.length) return false;
-  j.model = list[0]; j.modelLabel = list[0].label; return true;
+const LIM = { soft: 45000, hard: 120000, lsoft: 150000, lhard: 420000, offer: 15 };
+const COOL = {};
+const cooling = (c) => (COOL[keyOf(c)] || 0) > Date.now();
+function peekNext(j) { return choices().find((c) => !j.failed.has(keyOf(c)) && keyOf(c) !== keyOf(j.model) && !cooling(c)) || null; }
+function nextModel(j) { const n = peekNext(j); if (!n) return false; j.model = n; j.modelLabel = n.label; return true; }
+function logEv(j, t) { j.events.push({ t: Date.now(), x: t }); if (j.events.length > 30) j.events.shift(); }
+const secs = (ms) => Math.round(ms / 1000);
+
+/* What went wrong, in plain words, and what to do about it. */
+function diagnose(m) {
+  m = String(m || '');
+  if (/HTTP 429|rate limit|quota|too many requests/i.test(m)) { const w = m.match(/try again in\s*([\d.]+)\s*(ms|s|m)\b/i); let wait = 0; if (w) wait = Math.ceil(parseFloat(w[1]) * (w[2] === 'ms' ? 0.001 : w[2] === 'm' ? 60 : 1)); return { kind: 'busy', wait: Math.min(90, wait), text: 'The free limit for this model was reached for the moment.', fix: 'Free models allow only so much per minute. Waiting a little, or using another model, fixes it.' }; }
+  if (/HTTP 40[13]|api key|unauthor|permission|invalid.*key/i.test(m)) return { kind: 'auth', text: 'The key for this model was refused.', fix: 'Open Me and check the key, or use another model.' };
+  if (/HTTP 404|not found|does not exist|decommission/i.test(m)) return { kind: 'missing', text: 'This model is not available any more.', fix: 'Pick another model.' };
+  if (/HTTP 5\d\d|overloaded|unavailable/i.test(m) && !/HTTP 50[24]/.test(m)) return { kind: 'server', text: 'The provider had a problem on its side.', fix: 'It usually clears in a minute. Another model can take over meanwhile.' };
+  return { kind: 'other', text: 'The model gave an unexpected answer.', fix: 'Trying again usually works.' };
 }
+
+/* The handover. Everything a new model needs to continue as if nothing changed. */
+function briefing(j) {
+  const o = j.plan || j.outline, last = j.handoffs[j.handoffs.length - 1];
+  let plan = 'Planning has not finished yet.';
+  if (j.plan) { const mods = []; j.plan.lessons.forEach((L, i) => { let m = mods.find((x) => x.t === L.module); if (!m) { m = { t: L.module, l: [] }; mods.push(m); } m.l.push((i + 1) + '. ' + L.title); }); plan = mods.map((m, k) => 'Module ' + (k + 1) + ' ' + m.t + ': ' + m.l.join('; ')).join('\n'); }
+  else if (j.outline) plan = j.outline.modules.map((m, k) => 'Module ' + (k + 1) + ': ' + m.title + ' (' + m.purpose + ')').join('\n') + (j.planned.length ? '\nLesson plans finished for ' + j.planned.length + ' module(s).' : '');
+  const doneN = j.lessons.length, tail = doneN ? String(j.lessons[doneN - 1] || '').slice(-500) : '';
+  return 'HANDOVER BRIEFING. Read this fully, then continue the work seamlessly.\n' +
+    'You are taking over an unfinished course build from another model (' + (last ? last.from : 'the previous model') + '). The earlier work was good, is saved, and must not be redone or contradicted.\n' +
+    'MISSION: build the complete course "' + j.topic + '" for a ' + j.level.toLowerCase() + ' learner at ' + j.depth + ' depth, following the Course Craft Playbook rules above, so it reads as one course by one author.\n' +
+    (o ? 'COURSE: "' + o.title + '". Outcome: ' + (o.outcome || '') + '\n' : '') + 'PLAN:\n' + plan.slice(0, 2200) + '\n' +
+    'PROGRESS: stage "' + j.step + '"; ' + doneN + ' of ' + (j.n || '?') + ' lessons are finished.' + (j.handoffs.length > 1 ? ' This is handover number ' + j.handoffs.length + '.' : '') + '\n' +
+    'YOUR TASK NOW: ' + (j.task || 'continue from where the last model stopped') + '\n' +
+    (tail ? 'VOICE TO MATCH (the end of the last finished lesson): "' + tail.replace(/\s+/g, ' ') + '"\n' : '') +
+    'RULES: continue exactly at the current task, keep the same voice, structure and formatting, never mention this handover or the previous model, and return only what the task asks for (only JSON when JSON is asked for).';
+}
+function withBrief(j, messages) {
+  if (!j.handoffs.length) return messages;
+  const b = briefing(j);
+  return messages.map((m, i) => (i === 0 && m.role === 'system' ? { role: 'system', content: m.content + '\n\n' + b } : m));
+}
+function doSwitch(j, from, why) {
+  const prevLabel = from.label;
+  if (why === 'auth' || why === 'missing') j.failed.add(keyOf(from)); else COOL[keyOf(from)] = Date.now() + 3 * 60000;
+  if (!nextModel(j)) return false;
+  j.handoffs.push({ from: prevLabel, to: j.modelLabel, at: j.msg, why });
+  j.used.add(j.modelLabel); j.health = 'ok';
+  logEv(j, 'Switched from ' + prevLabel + ' to ' + j.modelLabel + '. The full plan and progress were handed over.');
+  j.note = 'Switched to ' + j.modelLabel + '. It has the full plan and picks up from ' + (j.msg || 'where it stopped').toLowerCase() + '.'; paint();
+  return true;
+}
+
+/* The countdown card. Shown on every screen, so it is seen wherever you are. */
+function openOffer(j, o) {
+  closeOffer(j); const a = A(), nx = peekNext(j); if (!nx) return null;
+  const el = document.createElement('div'); el.id = 'bswitch'; el.className = 'bswitch pn-strong'; el.setAttribute('role', 'alertdialog'); el.setAttribute('aria-label', 'Switch model?');
+  const total = (o.secs || 15) * 1000, t0 = Date.now();
+  el.innerHTML = `<p class="eyebrow">Taking too long</p><h3>Switch to a faster model?</h3><p class="help">${esc(o.why)}</p>
+    <p class="sw-line">Switching to <b>${esc(nx.label)}</b> in <b id="sw-n">${secs(total)}</b>s</p><div class="bar" aria-hidden="true"><i id="sw-bar" style="width:100%"></i></div>
+    <p class="help sw-note">${j.n ? 'Lesson ' + Math.min(j.i + 1, j.n) + ' of ' + j.n + '. ' : ''}Amani hands the new model the whole plan and everything written so far, so it continues from the same point.</p>
+    <div class="row-actions"><button class="btn primary" data-act="bsw-yes">Switch now</button><button class="btn" data-act="bsw-no">Keep waiting</button></div>`;
+  document.body.appendChild(el);
+  const h = { el, closed: false, close() { if (h.closed) return; h.closed = true; clearInterval(h.tm); el.remove(); if (j.offer === h) j.offer = null; }, yes() { if (h.closed) return; h.close(); o.onSwitch(); }, no() { if (h.closed) return; h.close(); o.onWait(); } };
+  h.tm = setInterval(() => { const left = Math.max(0, total - (Date.now() - t0)); const n = document.getElementById('sw-n'), b = document.getElementById('sw-bar'); if (n) n.textContent = Math.ceil(left / 1000); if (b) b.style.width = (left / total * 100) + '%'; if (left <= 0) h.yes(); }, 200);
+  j.offer = h; j.health = 'ask'; paint(); return h;
+}
+function closeOffer(j) { if (j && j.offer) j.offer.close(); const e = document.getElementById('bswitch'); if (e) e.remove(); }
+function askSwitch(j, why) { return new Promise((res) => { const h = openOffer(j, { why, secs: LIM.offer, onSwitch: () => res('switch'), onWait: () => res('wait') }); if (!h) res('wait'); }); }
+async function pause(j, s, kind) {
+  const end = Date.now() + s * 1000; j.health = kind;
+  while (Date.now() < end) { if (j.cancelled) throw new Error('cancelled'); j.note = (kind === 'busy' ? 'The model is busy. ' : '') + 'Trying again in ' + Math.ceil((end - Date.now()) / 1000) + 's.'; paint(); await sleep(1000); }
+  j.note = '';
+}
+function tickLive(j) { const e = document.getElementById('r-live'); if (e) e.textContent = liveText(j); }
+function liveText(j) { if (j.live) return 'Waiting for ' + j.live.label + ': ' + secs(Date.now() - j.live.t0) + 's'; return j.lastMs ? 'Last answer took ' + secs(j.lastMs) + 's' : 'Starting'; }
+
 async function call(j, messages, opt) {
-  for (let attempt = 0; attempt < 5; attempt++) {
+  opt = opt || {}; let slowHits = 0, busyHits = 0, otherHits = 0, nextAsk = 2;
+  for (let guard = 0; guard < 40; guard++) {
     if (j.cancelled) throw new Error('cancelled');
-    try { return await A().llm(messages, Object.assign({ signal: j.ctrl.signal, model: j.model }, opt || {})); }
-    catch (e) {
-      if (j.cancelled || (e && e.name === 'AbortError')) throw new Error('cancelled');
-      const m = String((e && e.message) || e);
-      if (/HTTP 429/.test(m) && attempt < 3) { j.note = 'The model is busy. Waiting a moment, then trying again.'; paint(); await sleep(14000 * (attempt + 1)); j.note = ''; continue; }
-      if (A().netErr(e)) { j.note = 'No internet right now. Waiting for it to come back. Your work so far is kept.'; paint(); const ok = await waitOnline(j); j.note = ''; if (!ok) throw new Error(j.cancelled ? 'cancelled' : 'The internet did not come back in time.'); continue; }
-      if (j.auto && j.model) { j.failed.add(keyOf(j.model)); if (nextModel(j)) { j.note = 'Switching to ' + j.modelLabel + '.'; paint(); continue; } }
-      if (attempt >= 1) throw e;
-      await sleep(2500);
+    const model = j.model, local = model && model.k === 'local';
+    const soft = local ? LIM.lsoft : LIM.soft, hard = local ? LIM.lhard : LIM.hard;
+    const cc = new AbortController(), link = () => cc.abort(); j.ctrl.signal.addEventListener('abort', link);
+    const t0 = Date.now(); j.live = { t0, label: model.label };
+    let decide; const decided = new Promise((r) => { decide = r; });
+    let offered = false, extra = 0;
+    const watch = setInterval(() => {
+      const el = Date.now() - t0;
+      if (!offered && el > soft + extra && j.stall !== 'wait' && peekNext(j)) {
+        offered = true; if (j.health === 'ok') j.health = 'slow'; logEv(j, model.label + ' has been slow for ' + secs(el) + ' seconds.');
+        openOffer(j, { why: model.label + ' has not answered for ' + secs(el) + ' seconds.', secs: LIM.offer, onSwitch: () => decide('switch'), onWait: () => { extra += 60000; offered = false; } });
+      } else if (!offered && el > soft && j.health === 'ok') j.health = 'slow';
+      if (el > hard + extra) decide('timeout');
+      tickLive(j); pill();
+    }, 1000);
+    let res;
+    try {
+      res = await Promise.race([
+        A().llm(withBrief(j, messages), Object.assign({ fast: true }, opt, { signal: cc.signal, model })).then((v) => ({ v }), (e) => ({ e })),
+        decided.then((d) => ({ d }))]);
+    } finally { clearInterval(watch); closeOffer(j); j.ctrl.signal.removeEventListener('abort', link); j.live = null; }
+    if (j.cancelled) throw new Error('cancelled');
+    if (res.d) {
+      cc.abort(); j.lastMs = Date.now() - t0;
+      if (res.d === 'switch' && doSwitch(j, model, 'slow')) continue;
+      if (j.stall !== 'wait' && peekNext(j) && doSwitch(j, model, 'slow')) continue;
+      if (++slowHits >= 2) throw new Error(model.label + ' did not answer in time. Your work so far is kept. Continue, or choose another model.');
+      logEv(j, model.label + ' did not answer in ' + secs(Date.now() - t0) + ' seconds. Trying again.'); continue;
     }
+    if (res.v !== undefined) { j.lastMs = Date.now() - t0; j.calls++; j.callMs += j.lastMs; if (j.health !== 'ask') j.health = 'ok'; return res.v; }
+    const e = res.e; if (e && e.name === 'AbortError') throw new Error('cancelled');
+    const m = String((e && e.message) || e);
+    if (A().netErr(e)) {
+      j.health = 'offline'; logEv(j, 'No internet. Waiting for it to return.'); j.note = 'No internet right now. Waiting for it to come back. Your work so far is kept.'; paint();
+      const ok = await waitOnline(j); j.note = ''; if (!ok) throw new Error(j.cancelled ? 'cancelled' : 'The internet did not come back in time.');
+      j.health = 'ok'; logEv(j, 'Back online. Continuing.'); continue;
+    }
+    const d = diagnose(m);
+    if (d.kind === 'auth' || d.kind === 'missing') {
+      logEv(j, model.label + ': ' + d.text);
+      if (doSwitch(j, model, d.kind)) continue;
+      throw new Error(d.text + ' ' + d.fix);
+    }
+    if (d.kind === 'busy') {
+      busyHits++; const w = d.wait || Math.min(40, 8 * busyHits); j.health = 'busy'; logEv(j, model.label + ' is busy (free limit). Needs about ' + w + ' seconds.');
+      if ((busyHits >= nextAsk || (w > 20 && busyHits >= nextAsk - 1)) && j.stall !== 'wait' && peekNext(j)) {
+        const ans = await askSwitch(j, model.label + ' keeps hitting its free limit. ' + d.fix);
+        if (j.cancelled) throw new Error('cancelled');
+        if (ans === 'switch' && doSwitch(j, model, 'slow')) continue;
+        nextAsk = busyHits + 3;
+      }
+      if (busyHits > 6) throw new Error(model.label + ' stayed busy. Wait a few minutes, or choose another model. Your work so far is kept.');
+      await pause(j, w, 'busy'); j.health = 'ok'; continue;
+    }
+    otherHits++; logEv(j, model.label + ': ' + d.text);
+    if (d.kind === 'server' && otherHits >= 2 && j.stall !== 'wait' && peekNext(j)) { const ans = await askSwitch(j, model.label + ' is having trouble on its side.'); if (ans === 'switch' && doSwitch(j, model, 'slow')) continue; }
+    if (otherHits >= 3) throw new Error(d.text + ' ' + d.fix + ' (' + m.slice(0, 120) + ')');
+    await pause(j, 3 * otherHits, 'busy'); j.health = 'ok';
   }
   throw new Error('The model did not answer after several tries.');
 }
@@ -287,6 +462,7 @@ const NOTE_RESEARCH = (j) => j.research.sources.length ? '\nRESEARCH (real sourc
 /* ---- Planning: outline first, then the lessons of each module. Size comes from the subject. ---- */
 async function outlineStep(j) {
   const D = DEPTH[j.depth];
+  j.task = 'Plan the course outline: choose the subject type, then the modules in order.';
   const sys = sysFor(j) + '\nYou are planning a course. First read the subject and choose its type. Return ONLY valid JSON, with no text before or after it.';
   const sizeNote = j.depth === 'short' ? 'The learner wants the short version: only what gives real value, about 4 to 10 lessons in total.' : j.depth === 'deep' ? 'The learner wants the deep, extended version: cover the subject thoroughly, including projects, case studies and common mistakes.' : 'The learner wants the full standard course: cover what is needed to truly learn the subject.';
   const usr = `Plan the structure of a course.\nTopic: ${j.topic}\nLearner level: ${j.level}\nLearner: someone studying alone on a phone or laptop, possibly in Nigeria, with limited data.\n${sizeNote}\nLet the subject decide how many modules the course needs and how many lessons each module holds. Do not use a fixed number. Order modules so each builds on the last, and end with a finish-line project or review where it fits.${NOTE_RESEARCH(j)}\n\nReturn JSON in exactly this shape:\n{"type":"software|concept|maths|craft|language|technical|business|creative|life","typeReason":"one short sentence","title":"Course title","subtitle":"One sentence promise","outcome":"After this course you can ...","modules":[{"title":"Module name","purpose":"What this module achieves","lessonsHint":4}]}`;
@@ -305,6 +481,7 @@ async function outlineStep(j) {
 }
 async function moduleStep(j, mi) {
   const o = j.outline, m = o.modules[mi], D = DEPTH[j.depth];
+  j.task = 'Plan the lessons of module ' + (mi + 1) + ' of ' + o.modules.length + ', "' + m.title + '". Return the lessons as JSON.';
   const prior = j.planned.reduce((a, l) => a.concat(l), []).map((l) => l.title);
   const share = j.depth === 'short' ? `The whole course should stay about 4 to 10 lessons, so this module should usually have ${m.lessonsHint <= 2 ? '1 or 2' : '2 to 3'} lessons.` : `Give this module as many lessons as it truly needs (a guess was ${m.lessonsHint}; it is not a limit).`;
   const sys = sysFor(j, o) + '\nReturn ONLY valid JSON, with no text before or after it.';
@@ -348,10 +525,10 @@ function lessonPrompt(j, i, pass, pp, soFar, srcs) {
 async function lessonStep(j, i) {
   const L = j.plan.lessons[i], pp = passPlan(j, L), srcs = srcFor(j, L); let body = '';
   for (let pass = 0; pass < pp.passes.length; pass++) {
-    j.sub = L.title + (pp.passes.length > 1 ? ' (part ' + (pass + 1) + ' of ' + pp.passes.length + ')' : ''); paint();
+    j.sub = L.title + (pp.passes.length > 1 ? ' (part ' + (pass + 1) + ' of ' + pp.passes.length + ')' : ''); j.task = 'Write ' + (pp.passes.length > 1 ? 'part ' + (pass + 1) + ' of ' + pp.passes.length + ' of ' : '') + 'lesson ' + (i + 1) + ' of ' + j.n + ', "' + L.title + '", covering: ' + pp.passes[pass].join(' | ') + '. ' + (body ? 'Continue directly from the text already written, without repeating it.' : 'This is the start of the lesson.'); paint();
     let part = '', tries = 0;
     while (tries < 2) {
-      part = cleanMd(await call(j, lessonPrompt(j, i, pass, pp, body, srcs), { max: 3000, temp: 0.5 })); tries++;
+      part = cleanMd(await call(j, lessonPrompt(j, i, pass, pp, body, srcs), { max: Math.min(3000, Math.round(pp.per * 2.4) + 600), temp: 0.5 })); tries++;
       if (words(part) >= Math.min(120, pp.per * 0.4)) break;
       if (tries < 2) j.note = 'Improving lesson ' + (i + 1) + '...';
     }
@@ -377,6 +554,7 @@ async function videoStep(j, i) {
   R.videos += r.videos.length; return r.videos;
 }
 async function quizStep(j, i, body, L) {
+  j.task = 'Write the practice questions and flashcards for lesson ' + (i + 1) + ', "' + L.title + '", as JSON.';
   const nq = L.weight === 'heavy' ? 5 : L.weight === 'light' ? 3 : 4, nc = L.weight === 'heavy' ? 6 : 4;
   const sys = PB().core + '\nReturn ONLY valid JSON, with no text before or after it.';
   const usr = `Here is a lesson.\n\n${body.slice(0, isSmall(j) ? 5000 : 9000)}\n\nWrite ${nq} multiple-choice questions and ${nc} flashcards about it. Questions: four options, exactly one correct, three plausible wrong answers that reflect real misunderstandings; test understanding or use, not memory of a phrase; give a short explanation of why the right answer is right. Flashcards: one idea each, no yes/no cards.\nReturn JSON: {"quiz":[{"prompt":"...","options":["...","...","...","..."],"answer":0,"explanation":"..."}],"cards":[{"front":"...","back":"..."}]}`;
@@ -428,10 +606,10 @@ function gates(j, pack) {
   return { score, passed: score >= 85 && notes.filter((x) => !/Not researched/.test(x)).length < 4, notes: Array.from(new Set(notes)) };
 }
 function sourcesMd(j, p) {
-  const R = j.research, d = today(), terms = Array.from(new Set(p.lessons.reduce((a, l) => a.concat(l.terms), []))).slice(0, 14);
-  const how = R.mode === 'web' || R.mode === 'partial' ? `**How this course was made.** Amani searched the web (${R.searches} searches on ${d}), read what came back, and wrote the lessons using the model ${j.modelLabel}, following the Knowvia Course Craft Playbook ${PB().version}. Numbers like [3] in a lesson point to the sources below.${R.mode === 'partial' ? ' Research stopped part way, so some lessons were written without new sources.' : ''}`
-    : R.mode === 'wiki' ? `**How this course was made.** Amani looked up a few Wikipedia entries (on ${d}) and wrote the lessons with the model ${j.modelLabel}, following the Course Craft Playbook ${PB().version}. This is light research only.`
-    : `**How this course was made.** Amani wrote it using the model ${j.modelLabel}, following the Knowvia Course Craft Playbook ${PB().version}. It used the model's own knowledge. No web research was done, and no facts were checked against named sources.`;
+  const R = j.research, ms = Array.from(j.used).join(' and '), d = today(), terms = Array.from(new Set(p.lessons.reduce((a, l) => a.concat(l.terms), []))).slice(0, 14);
+  const how = R.mode === 'web' || R.mode === 'partial' ? `**How this course was made.** Amani searched the web (${R.searches} searches on ${d}), read what came back, and wrote the lessons using ${ms}, following the Knowvia Course Craft Playbook ${PB().version}. Numbers like [3] in a lesson point to the sources below.${R.mode === 'partial' ? ' Research stopped part way, so some lessons were written without new sources.' : ''}`
+    : R.mode === 'wiki' ? `**How this course was made.** Amani looked up a few Wikipedia entries (on ${d}) and wrote the lessons with ${ms}, following the Course Craft Playbook ${PB().version}. This is light research only.`
+    : `**How this course was made.** Amani wrote it using ${ms}, following the Knowvia Course Craft Playbook ${PB().version}. It used the model's own knowledge. No web research was done, and no facts were checked against named sources.`;
   const list = R.sources.length ? '\n\n## Sources read\n\n' + R.sources.map((s) => `${s.id}. [${s.title}](${s.url}), ${s.host}, read ${s.date}${j.done_.some((d2) => (d2.refs || []).some((r) => r.n === s.id)) ? '' : ' (background only)'}`).join('\n') : '';
   const vids = R.videos ? `\n\n## Videos\n\nVideo links were found by search and each one was checked to exist and be playable on ${d}. Videos are optional extras. Their content was not reviewed by Knowvia.` : '';
   return `# Sources and honesty\n\n${how}\n\n**What that means.** Search finds what is on the web, but it does not make every claim true. A person has not reviewed this course. Check anything important, especially prices, laws and tool features that change, before relying on it. Examples marked as invented are for practice only.${list}${vids}\n\n## Topics covered\n\n${terms.length ? terms.map((t) => '- ' + t).join('\n') : '- See the lessons'}\n`;
@@ -469,7 +647,7 @@ async function run(j) {
     const as = assemble(j), p = j.plan, R = j.research;
     const mins = as.mods.reduce((s, m) => s + m.lessons.reduce((t, l) => t + l.minutes, 0), 0);
     const researched = R.mode === 'web' || R.mode === 'partial';
-    const pack = { formatVersion: 1, id: 'built-' + slug(p.title) + '-' + Date.now().toString(36), title: p.title, subtitle: p.subtitle, level: j.level, depth: j.depth, language: 'en', version: '1.0.0', estimatedHours: Math.max(0.5, Math.round(mins / 6) / 10), outcome: p.outcome, author: 'Built by Amani with ' + j.modelLabel, origin: 'built', builtAt: Date.now(), playbook: PB().version, type: p.type,
+    const pack = { formatVersion: 1, id: 'built-' + slug(p.title) + '-' + Date.now().toString(36), title: p.title, subtitle: p.subtitle, level: j.level, depth: j.depth, language: 'en', version: '1.0.0', estimatedHours: Math.max(0.5, Math.round(mins / 6) / 10), outcome: p.outcome, author: 'Built by Amani with ' + Array.from(j.used).join(' and '), origin: 'built', builtAt: Date.now(), playbook: PB().version, type: p.type,
       quality: { researched, researchMode: R.mode, sources: R.sources.length, videos: R.videos, searches: R.searches, factChecked: researched ? 'Written from web sources found by search. Claims were not individually verified by a person.' : R.mode === 'wiki' ? 'Light research only (Wikipedia). Not individually verified.' : 'not checked: written from the model\'s own knowledge, no web research', humanReviewed: false, note: 'Built by AI. Check important facts before relying on them. Examples marked as invented are for practice only.' },
       modules: as.mods, quiz: as.quiz, flashcards: as.cards, sources: sourcesMd(j, p) };
     pack.quality.gates = gates(j, pack);
@@ -488,7 +666,7 @@ function start() {
   const a = A(), list = choices(); if (!list.length) { a.toast('Connect a model first'); return; }
   const cur = chosen(list), topic = (BS.topic || '').trim(); if (topic.length < 2) { a.toast('Type a topic first'); return; }
   const K = window.KVResearch, use = BS.research && K && K.status() === 'ready';
-  const j = { topic, level: BS.level, depth: BS.depth, useResearch: !!use, auto: BS.modelKey === 'auto', model: cur, modelLabel: cur.label, failed: new Set(), ctrl: new AbortController(), cancelled: false, research: null, outline: null, planned: [], plan: null, lessons: [], qz: [], done_: [], weak: [], pct: 0, msg: 'Starting', sub: '', step: 'research', i: 0, n: 0, note: '' };
+  const j = { topic, level: BS.level, depth: BS.depth, useResearch: !!use, auto: BS.modelKey === 'auto', model: cur, modelLabel: cur.label, failed: new Set(), stall: BS.stall, handoffs: [], used: new Set([cur.label]), events: [], health: 'ok', t0: Date.now(), calls: 0, callMs: 0, lastMs: 0, live: null, offer: null, task: '', ctrl: new AbortController(), cancelled: false, research: null, outline: null, planned: [], plan: null, lessons: [], qz: [], done_: [], weak: [], pct: 0, msg: 'Starting', sub: '', step: 'research', i: 0, n: 0, note: '' };
   BS.job = j; run(j);
 }
 
@@ -501,6 +679,9 @@ R['b-level'] = (t, d) => { BS.level = d.v; A().renderScreen(); };
 R['b-depth'] = (t, d) => { BS.depth = d.v; A().renderScreen(); };
 R['b-res'] = (t, d) => { BS.research = d.v === 'on'; A().renderScreen(); };
 R['b-model'] = (t, d) => { BS.modelKey = d.v; A().renderScreen(); };
+R['b-stall'] = (t, d) => { BS.stall = d.v; A().renderScreen(); };
+R['bsw-yes'] = () => { const j = BS.job; if (j && j.offer) j.offer.yes(); };
+R['bsw-no'] = () => { const j = BS.job; if (j && j.offer) j.offer.no(); };
 REG.ins['b-topic'] = (t) => { BS.topic = t.value.slice(0, 90); };
 R['b-start'] = start;
 R['b-bg'] = () => A().go('home');
@@ -510,8 +691,8 @@ R['b-cancel'] = () => {
   document.body.appendChild(ov);
 };
 R['b-no'] = () => { const o = document.getElementById('b-ov'); if (o) o.remove(); };
-R['b-yes'] = () => { const o = document.getElementById('b-ov'); if (o) o.remove(); const j = BS.job; if (j) { j.cancelled = true; try { j.ctrl.abort(); } catch (e) { /* ignore */ } } };
-R['b-retry'] = () => { const j = BS.job; if (!j) return; j.ctrl = new AbortController(); j.cancelled = false; j.failed = new Set(); const list = choices(); if (j.auto && list.length) { j.model = list[0]; j.modelLabel = list[0].label; } run(j); };
+R['b-yes'] = () => { const o = document.getElementById('b-ov'); if (o) o.remove(); const j = BS.job; if (j) { j.cancelled = true; closeOffer(j); try { j.ctrl.abort(); } catch (e) { /* ignore */ } } };
+R['b-retry'] = () => { const j = BS.job; if (!j) return; j.ctrl = new AbortController(); j.cancelled = false; j.failed = new Set(); Object.keys(COOL).forEach((k) => delete COOL[k]); j.health = 'ok'; logEv(j, 'Continuing the build.'); const list = choices(); if (j.auto && list.length && keyOf(list[0]) !== keyOf(j.model)) { const from = j.model; j.model = list[0]; j.modelLabel = list[0].label; if (j.lessons.length || j.plan || j.outline) { j.handoffs.push({ from: from.label, to: j.modelLabel, at: j.msg, why: 'resume' }); j.used.add(j.modelLabel); } } run(j); };
 R['b-newmodel'] = () => { const j = BS.job; if (j) { BS.topic = j.topic; } BS.job = null; BS.view = 'setup'; A().renderScreen(); };
 R['b-more'] = () => { BS.job = null; BS.view = 'catalog'; BS.q = ''; pill(); A().renderScreen(); };
 R['b-open'] = () => { const a = A(), j = BS.job; if (!j || !j.pack) return; a.setActivePack(j.pack.id); const first = a.lessons(j.pack)[0]; BS.job = null; BS.view = 'catalog'; pill(); a.go('lesson/' + first.id); };
@@ -531,5 +712,5 @@ R['b-pb-dl'] = () => { const b = new Blob([PB().full], { type: 'text/markdown' }
 /* search box: update results without losing focus */
 document.addEventListener('input', (ev) => { if (ev.target && ev.target.id === 'bq') { BS.q = ev.target.value; const r = A().$('#bres'); if (r) r.innerHTML = resultsHtml(); } });
 document.addEventListener('submit', (ev) => { if (ev.target && ev.target.id === 'bform') { ev.preventDefault(); const q = (A().$('#bq') || {}).value || ''; if (q.trim().length >= 2) { BS.topic = q.trim(); BS.view = 'setup'; A().renderScreen(); } } });
-window.KVBuild.state = BS;
+window.KVBuild.state = BS; window.KVBuild.limits = LIM; window.KVBuild.cool = COOL;
 })();

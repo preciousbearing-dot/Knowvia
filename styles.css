@@ -632,7 +632,7 @@ html[data-skin=gold] .splash .mk svg{filter:drop-shadow(0 18px 30px rgba(0,0,0,.
 .gnotes{margin:0;padding-left:20px;font-size:14px;color:var(--muted);line-height:1.6}
 .ov-card.pbread{max-width:720px;width:100%;max-height:88vh;display:flex;flex-direction:column;gap:14px}
 .pbbody{max-height:80vh;overflow:auto;line-height:1.65;font-size:15px}
-.bpill{position:fixed;z-index:60;left:50%;transform:translateX(-50%);bottom:24px;display:flex;align-items:center;gap:10px;padding:10px 18px;border-radius:99px;color:var(--ink);font-size:14px;animation:kvSlideIn .4s var(--ease) both}
+.bpill{position:fixed;z-index:60;left:0;right:0;margin:0 auto;width:max-content;transform:none;bottom:24px;display:flex;align-items:center;gap:10px;padding:10px 18px;border-radius:99px;color:var(--ink);font-size:14px;animation:kvSlideIn .4s var(--ease) both}
 .bpill .s{color:var(--muted)}
 .okdot{width:12px;height:12px;border-radius:50%;background:var(--ok)}
 @media (max-width:859px){
@@ -756,3 +756,31 @@ html.tfull .scrim{display:none}
  #tutor.typing .t-input{padding-bottom:10px}
 }
 @media (max-width:640px){.grid2{grid-template-columns:minmax(0,1fr)}}
+
+/* ---- v0.5.3: smart build, draggable bubble, roomy model rows ---- */
+.bpill{touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab;max-width:min(92vw,380px);padding:9px 16px 9px 10px;gap:8px;min-height:44px}
+.bpill .bt{display:flex;gap:6px;align-items:baseline;min-width:0;white-space:nowrap}
+.bpill .bn{overflow:hidden;text-overflow:ellipsis;max-width:34vw;color:var(--ink)}
+.bpill .s{flex:none;font-weight:700}
+.bpill.drag{cursor:grabbing;box-shadow:0 18px 44px rgba(20,24,60,.3);transition:none;animation:none}
+.bpill.moved{animation:none}
+.bpill.warn .s{color:var(--bad-fg,#b4472f)}
+.bpill .grip{flex:none;width:10px;height:20px;opacity:.45;background:radial-gradient(circle,currentColor 1.4px,transparent 1.6px) 0 0/5px 6px}
+body.kb-typing #bpill:not(.moved){display:none}
+.bswitch{position:fixed;z-index:95;left:0;right:0;margin:0 auto;bottom:24px;width:min(440px,calc(100vw - 24px));padding:18px 18px 16px;border-radius:var(--r-lg);animation:kvSlideIn .45s var(--ease) both}
+.bswitch h3{margin:2px 0 6px;font-size:19px}.bswitch .sw-line{margin:10px 0 8px;font-size:15px}.bswitch .sw-note{margin:10px 0 12px}
+.bswitch .bar{height:6px}.bswitch .bar i{transition:width .2s linear}
+.bswitch .row-actions{display:flex;gap:8px;flex-wrap:wrap}
+@media (max-width:859px){.bswitch{bottom:calc(92px + env(safe-area-inset-bottom,0px))}}
+.health .hl-top{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.hl-chip{display:inline-flex;align-items:center;gap:8px;padding:5px 12px;border-radius:99px;font-size:13px;font-weight:700;background:var(--good-bg);color:var(--good-fg)}
+.hl-chip i{width:8px;height:8px;border-radius:50%;background:currentColor}
+.hl-chip.warn{background:var(--warn-bg,#fff1d6);color:var(--warn-fg,#8a5a00)}.hl-chip.bad{background:var(--bad-bg);color:var(--bad-fg)}
+.hl-live{font-size:13.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.hl-line,.hl-tip{margin:10px 0 0}.hl-ev{margin:10px 0 0;padding-left:18px;font-size:13px;color:var(--muted);line-height:1.55}
+@media (max-width:640px){
+ .mrow{display:grid;grid-template-columns:22px minmax(0,1fr);column-gap:12px;row-gap:6px;align-items:start}
+ .mrow .rad{margin-top:2px}
+ .mrow .grow{min-width:0}.mrow b{overflow-wrap:anywhere}
+ .mrow .badge{grid-column:2;justify-self:start;margin:0}
+}

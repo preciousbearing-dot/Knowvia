@@ -907,10 +907,11 @@ function renderTutor() {
 function systemPrompt(ctx) {
   const who = 'You are Amani, a study companion inside the learning app Knowvia. ';
   const persona = REG.hooks.persona ? REG.hooks.persona() : 'Be warm and patient. ';
-  const rules = 'Use plain, simple English. Keep answers short (under 150 words) unless asked for more. Never invent facts, statistics or sources. Examples in the lesson marked as invented are for practice only. When asked to quiz, ask ONE question with options A, B and C and wait for the reply.\n' +
+  const earlier = 'Earlier replies in this chat may have been written by a different model or in a different voice. From now on, always speak as the character above. ';
+  const rules = 'Keep explanations easy to follow. The language, tone and length rules in YOUR CHARACTER above come first. Never invent facts, statistics or sources. Examples in the lesson marked as invented are for practice only. When asked to quiz, ask ONE question with options A, B and C and wait for the reply.\n' +
     'After your answer, add ONE final line in exactly this form: <<next: first idea | second idea | third idea>>. These are things the learner might tap next, written in the learner\'s voice, under 8 words each, and specific to what you just said (a follow-up question, a harder example, or a request to be quizzed). Include a quiz request in most replies. If you just asked a quiz question, give the answer options instead, for example <<next: A | B | C>>. Never mention or explain this line.\n\n';
-  if (ctx.home) return who + persona + 'The learner is on the home screen. They may ask about the course below or about how to study. Answer using the course. If something is not in the course, say so briefly and help from general knowledge, labelled as general knowledge. ' + rules + ctx.text;
-  return who + persona + 'The learner is reading the lesson below. Answer using the lesson. If the answer is not in the lesson, say so in one short sentence, then help from general knowledge and label it as general knowledge. ' + rules +
+  if (ctx.home) return who + persona + earlier + 'The learner is on the home screen. They may ask about the course below or about how to study. Answer using the course. If something is not in the course, say so briefly and help from general knowledge, labelled as general knowledge. ' + rules + ctx.text;
+  return who + persona + earlier + 'The learner is reading the lesson below. Answer using the lesson. If the answer is not in the lesson, say so in one short sentence, then help from general knowledge and label it as general knowledge. ' + rules +
     'THE LESSON ON SCREEN (Lesson ' + ctx.n + ' of the course "' + pack().title + '"):\n' + ctx.text;
 }
 const QUICK = {
@@ -936,7 +937,8 @@ async function askTutor(shown, prompt, quote) {
   msgs.push(um); msgs.push(reply);
   busy = true; chipsOpen = true; renderTutor();
   const history = msgs.slice(0, -2).filter((m) => m.text).slice(-8).map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: (m.quote ? '[Selected passage: "' + m.quote.slice(0, 300) + '"] ' : '') + m.text }));
-  const payload = [{ role: 'system', content: systemPrompt(ctx) }].concat(history, [{ role: 'user', content: prompt || shown }]);
+  const remind = REG.hooks.personaReminder ? REG.hooks.personaReminder() : '';
+  const payload = [{ role: 'system', content: systemPrompt(ctx) }].concat(history, [{ role: 'user', content: (prompt || shown) + remind }]);
   ctrl = new AbortController();
   const live = () => { const nodes = $$('#msgs .bubble.bot'); return nodes[nodes.length - 1]; };
   const onChunk = (c) => { raw.v += c; reply.text = visibleText(raw.v); const n = live(); if (n) { n.innerHTML = reply.text ? renderMd(reply.text) : '<span class="typing"><i></i><i></i><i></i></span>'; const m = $('#msgs'); if (m) m.scrollTop = m.scrollHeight; } };
@@ -1430,8 +1432,8 @@ window.addEventListener('resize', () => {
   rz = setTimeout(() => { if (window.innerWidth === lastW) return; lastW = window.innerWidth; renderTop(); renderTutor(); }, 120);
 });
 /* While typing on a phone, give the chat the room: hide the status lines and fold the suggestions. */
-document.addEventListener('focusin', (e) => { if (e.target && e.target.id === 'tin') { const t = $('#tutor'); if (t) t.classList.add('typing'); setTimeout(() => { const m = $('#msgs'); if (m) m.scrollTop = m.scrollHeight; }, 250); } });
-document.addEventListener('focusout', (e) => { if (e.target && e.target.id === 'tin') { const t = $('#tutor'); if (t) t.classList.remove('typing'); } });
+document.addEventListener('focusin', (e) => { if (e.target && e.target.id === 'tin') { document.body.classList.add('kb-typing'); const t = $('#tutor'); if (t) t.classList.add('typing'); setTimeout(() => { const m = $('#msgs'); if (m) m.scrollTop = m.scrollHeight; }, 250); } });
+document.addEventListener('focusout', (e) => { if (e.target && e.target.id === 'tin') { document.body.classList.remove('kb-typing'); const t = $('#tutor'); if (t) t.classList.remove('typing'); } });
 
 /* ---------------- Select text: a small action pop-up (lessons and Amani's answers) ---------------- */
 const SEL = { t: 0, txt: '' };
@@ -1501,8 +1503,11 @@ async function llm(messages, o) {
   const c = cloudCfg(sel.p);
   const body = { model: sel.m || c.model, messages, temperature: o.temp === undefined ? 0.5 : o.temp, stream: false };
   if (o.max) body.max_tokens = o.max;
-  const r = await cloudFetch(sel.p, '/chat/completions', { method: 'POST', signal: sig, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  if (!r.ok) { let b = ''; try { b = (await r.text()).slice(0, 200); } catch (e) { /* ignore */ } throw new Error('HTTP ' + r.status + (b ? ' ' + b : '')); }
+  if (o.fast && /gpt-oss|gemini-(2\.5|3)/i.test(String(body.model))) body.reasoning_effort = 'low';
+  const post = () => cloudFetch(sel.p, '/chat/completions', { method: 'POST', signal: sig, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  let r = await post();
+  if (!r.ok && r.status === 400 && body.reasoning_effort) { let t0 = ''; try { t0 = await r.clone().text(); } catch (e) { /* ignore */ } if (/reasoning|unknown|unrecognized|unsupported/i.test(t0)) { delete body.reasoning_effort; r = await post(); } }
+  if (!r.ok) { let b = ''; try { b = (await r.text()).slice(0, 420); } catch (e) { /* ignore */ } throw new Error('HTTP ' + r.status + (b ? ' ' + b : '')); }
   const j = await r.json();
   return (j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || '';
 }

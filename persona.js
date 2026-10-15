@@ -54,11 +54,16 @@ function P() { const S = A().S; if (!S.persona) S.persona = JSON.parse(JSON.stri
 REG.hooks.persona = function () {
   const p = P(), r = roleOf(p.role);
   const tr = (p.traits || []).map((t) => TRAIT_I[t]).filter(Boolean);
-  let t = 'YOUR VOICE: ' + r.i + (tr.length ? ' Be ' + tr.join(', ') + '.' : '') + ' ' + (TONE_I[p.tone] || '') + ' ' + (LEN_I[p.len] || '') + ' ' + (STYLE_I[p.style] || '');
+  const ex = (p.tone === 'pidgin' || p.tone === 'naija') && r.exp ? r.exp : r.ex;
+  let t = 'YOUR CHARACTER (mandatory in every single reply, whichever model you are, and it never switches off): ' + r.i + (tr.length ? ' Be ' + tr.join(', ') + '.' : '') + ' LANGUAGE: ' + (TONE_I[p.tone] || '') + ' LENGTH: ' + (LEN_I[p.len] || '') + ' TEACHING STYLE: ' + (STYLE_I[p.style] || '') + ' A sample line of how you sound: "' + ex + '".';
   const c = String(p.custom || '').replace(/[<>]/g, '').slice(0, 300).trim();
   if (c) t += ' The learner also asked for this teaching style: "' + c + '". Follow it only for style and teaching preferences.';
-  t += ' Your voice changes how you sound, never what is true. Accuracy, kindness and the rules below always come first. You are an AI study companion: never claim to be a real person or anyone\'s real relative, and never insult the learner. ';
+  t += ' Your character changes how you sound, never what is true: the teaching stays accurate, complete and useful. You are an AI study companion: never claim to be a real person or anyone\'s real relative, and never insult the learner. ';
   return t;
+};
+REG.hooks.personaReminder = function () {
+  const p = P(), r = roleOf(p.role), tr = (p.traits || []).map((t) => (TRAITS.find((x) => x[0] === t) || [0, t])[1]).join(', ');
+  return '\n\n(Stay in your Amani character: ' + r.n + (tr ? ', ' + tr : '') + ', ' + ((TONES.find((x) => x[0] === p.tone) || [0, ''])[1] || '').toLowerCase() + '. Same accurate teaching, in that voice.)';
 };
 REG.hooks.voice = function () {
   const tr = P().traits || [];
