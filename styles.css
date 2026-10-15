@@ -741,3 +741,18 @@ html.tfull .scrim{display:none}
 @media (max-width:370px){.sp-b:not(.main) span{display:none}}
 .prose ::selection,.bubble ::selection{background:color-mix(in srgb,var(--accent-text) 28%,transparent)}
 @media (max-width:480px){.sp-b[data-sel=copy] span,.sp-b[data-sel=listen] span{display:none}.sp-b[data-sel=copy],.sp-b[data-sel=listen]{padding:0 11px}}
+
+/* ===== v0.5.2 fixes: roomy notices, typing room on phones ===== */
+.nudge{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start;gap:14px 14px;padding:18px}
+.nudge .ico{display:flex;align-items:center;justify-content:center;width:46px;height:46px;border-radius:15px;background:var(--key-bg);color:var(--accent-text);flex:none}
+.nudge .grow b{display:block;font-size:16.5px;line-height:1.3;text-wrap:balance}
+.nudge .row-actions{grid-column:1/-1;margin:0;display:flex;gap:10px;flex-wrap:wrap}
+.nudge .row-actions .btn{flex:1 1 140px}
+@media (min-width:760px){.nudge{grid-template-columns:auto minmax(0,1fr) auto;align-items:center}.nudge .row-actions{grid-column:auto}.nudge .row-actions .btn{flex:0 0 auto}}
+@media (max-width:859px){
+ #tutor.typing .t-status,#tutor.typing .ctx{display:none}
+ #tutor.typing .t-head{padding-top:12px;gap:4px}
+ #tutor.typing .qwrap{display:none}
+ #tutor.typing .t-input{padding-bottom:10px}
+}
+@media (max-width:640px){.grid2{grid-template-columns:minmax(0,1fr)}}

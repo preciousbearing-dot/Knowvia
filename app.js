@@ -533,6 +533,7 @@ function screenHome() {
 }
 function offlineNudge() {
   if (!S.onboarded || !tutorReady() || localModelList().length || (S.hints.offlineUntil || 0) > Date.now()) return '';
+  if (!DESK && /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent)) return ''; /* phones cannot run the Ollama tutor yet */
   return `<section class="nudge pn-strong kv-in" style="--d:2"><span class="ico">${ic(I.laptop, 24, 1.8)}</span><div class="grow"><b>Want Amani to work with no internet?</b><p>Set up the offline tutor once. Then Amani keeps helping when your data runs out.</p></div>
     <div class="row-actions"><button class="btn primary sm" data-act="${DESK ? 'setupopen' : 'nav" data-r="me'}">Set it up</button><button class="btn sm" data-act="nudgeoff">Not now</button></div></section>`;
 }
@@ -558,13 +559,12 @@ function showOv(html) {
   ov.innerHTML = `<div class="ov-card pn-strong kv-in" role="dialog" aria-modal="true">${html}<div class="row-actions"><button class="btn primary" data-act="ovclose">Got it</button></div></div>`;
 }
 const SOON = {
-  upload: ['Your own sources', 'Add a PDF, like your SS1 maths textbook, or your own notes. Amani will read it, work out a start-to-finish study path, and answer from it with page references.', 'Not built yet. This is the next big step after this version.'],
-  build: ['Build a course', 'Pick a topic from a list or type your own. Amani, using your cloud model, builds a full course in the same format as the built-in ones, and you can pause and continue.', 'Not built yet. It comes after "Your own sources".']
+  upload: ['Your own sources', 'Add a PDF, like a textbook, or your own notes. Amani will read it, work out a start-to-finish study path, and answer from it with page references.', 'Coming in the next version. For now, use Build a course to make a course on any topic.']
 };
 
 function screenLearn() {
   const p = pack();
-  if (!p) return empty('No packs yet', 'Add a course pack to the packs folder and rebuild.');
+  if (!p) return empty('No packs yet', 'Open Library, then Build a course, to make your first one.');
   const pr = prog(), ls = lessons(), doneN = ls.filter((l) => (pr.lessons[l.id] || {}).done).length;
   const nl = nextLesson(), started = doneN > 0 || (pr.lessons[nl.id] || {}).scroll > 0.02;
   const due = dueCards(p).length;
@@ -878,7 +878,7 @@ function renderTutor() {
   if (!open) { tutorFull = false; el.classList.remove('full'); document.documentElement.classList.remove('tfull'); return; }
   if (attachedKey !== chatKey()) { attached = ''; attachedKey = chatKey(); }
   el.classList.toggle('full', tutorFull); document.documentElement.classList.toggle('tfull', tutorFull);
-  const keep = ($('#tin') || {}).value || '';
+  const keep = ($('#tin') || {}).value || '', hadFocus = !!($('#tin') && document.activeElement === $('#tin'));
   const ctx = tutorContext(), t = S.tutor;
   const msgs = chat();
   const hello = ctx.home ? `Hi${S.name ? ' ' + esc(S.name) : ''}, I'm Amani. Ask me about your course, or how to study it.` : 'Ask me anything about this lesson. I can explain it more simply, give you an example, or quiz you.';
@@ -899,6 +899,7 @@ function renderTutor() {
       ${mdlOpen ? `<div class="mdl-menu pn-strong" id="mdlmenu" role="menu" aria-label="Available models">${menuHtml()}</div>` : ''}</form>
     <p class="t-status" id="t-status"><span class="dot" style="background:${t.brain === 'local' ? 'var(--ok)' : 'var(--accent-text)'}"></span>${statusLine()}</p>`;
   const tin = $('#tin'); if (tin && keep) tin.value = keep;
+  if (tin && hadFocus) { tin.focus({ preventScroll: true }); try { tin.setSelectionRange(tin.value.length, tin.value.length); } catch (x) {} el.classList.add('typing'); }
   el.classList.toggle('qc', !(chipsOpen && !busy));
   const m = $('#msgs'); m.scrollTop = m.scrollHeight;
   renderBrand();
@@ -1154,7 +1155,7 @@ function deviceInfo() {
 const VALS = [
   { eye: 'Welcome', h: 'Learn anything, even with no internet.', p: 'Knowvia keeps your courses on your device. Study on a bus, in a power cut, or anywhere data is slow.', scene: 'offline' },
   { eye: 'Meet Amani', h: 'A study companion that reads along with you.', p: 'Amani sees the lesson you are on. Ask it to explain, give an example, or quiz you. It answers from your course, not from guesswork.', scene: 'amani' },
-  { eye: 'Three ways to learn', h: 'Courses, your own sources, or build one.', p: 'Start with polished built-in courses. Soon you can add your own PDFs and notes, or have Amani build a whole course on any topic.', scene: 'ways' },
+  { eye: 'Three ways to learn', h: 'Courses, your own sources, or build one.', p: 'Start with polished built-in courses, or have Amani build a whole course on any topic. Adding your own PDFs and notes is coming next.', scene: 'ways' },
   { eye: 'Made for you', h: 'Three looks. One calm place to study.', p: 'Frost Glass, Soft Clay, or Charcoal and Gold. Choose the one that feels right, and change it any time.', scene: 'themes' },
   { eye: 'Private by design', h: 'Your progress stays on your device.', p: 'No account is needed to start. Knowvia asks for a permission only at the moment it needs it, and always tells you why.', scene: 'private' }
 ];
@@ -1169,7 +1170,7 @@ function obScene(k) {
   if (k === 'ways') return `<div class="ob-scene" style="height:auto;padding:6px 0"><div style="display:flex;flex-direction:column;gap:12px;align-items:center;width:100%">
     <div class="way pn-strong" style="--d:0"><span class="ico">${ic(I.book, 22, 1.8)}</span><span><b>Built-in courses</b><span class="s">Ready to study, work offline</span></span></div>
     <div class="way pn-strong" style="--d:1"><span class="ico">${ic(I.upload, 22, 1.8)}</span><span><b>Your own sources</b><span class="s">PDFs and notes, taught step by step</span></span><span class="soon">Soon</span></div>
-    <div class="way pn-strong" style="--d:2"><span class="ico">${ic(I.spark, 22, 1.8)}</span><span><b>Build a course</b><span class="s">Pick a topic, Amani builds it</span></span><span class="soon">Soon</span></div></div></div>`;
+    <div class="way pn-strong" style="--d:2"><span class="ico">${ic(I.spark, 22, 1.8)}</span><span><b>Build a course</b><span class="s">Pick a topic, Amani builds it</span></span></div></div></div>`;
   if (k === 'themes') return `<div class="ob-scene" style="gap:18px">${[['frost-light', 0], ['clay', -1.6], ['gold', -3.2]].map(([n, dl]) => `<span style="display:block;width:92px;height:92px;animation:kvFloat 5s ease-in-out infinite;animation-delay:${dl}s;filter:drop-shadow(0 14px 18px rgba(40,40,80,.25))">${KV.flow(n, 92)}</span>`).join('')}</div>`;
   return `<div class="ob-scene"><div class="orb pn-strong"><span style="color:var(--accent-text);display:flex;width:60%;height:60%">${ic(I.lock, 80, 1.5)}</span></div>
     <span class="chip pn-strong float-chip" style="left:5%;top:18%;animation-delay:-2s">No sign-up needed</span>
@@ -1179,7 +1180,7 @@ function obThemeHtml() {
   const t = resolvedTheme(), KV = window.KV;
   return `<div class="themes ob-th">${themeCard('frost', 'Frost Glass', 'Airy and modern. Light and dark.')}${themeCard('clay', 'Soft Clay', 'Warm, soft and tactile.')}${themeCard('gold', 'Charcoal and Gold', 'Luxurious and bold.')}</div>
     ${S.theme === 'frost' ? `<div class="field"><label>Frost Glass mode</label>${seg('frostmode', S.frostMode, [['light', 'Light'], ['dark', 'Dark'], ['auto', 'Automatic']])}</div>` : ''}
-    <div style="display:flex;align-items:center;gap:16px;padding:14px 16px;border-radius:var(--r-md)" class="pn-strong"><span style="display:block;width:64px;height:64px;flex:none">${KV.flow(t, 64)}</span><span style="display:block;width:64px;height:64px;flex:none">${KV.amani(t, 64, { round: true })}</span><span class="help" style="margin:0;font-size:14.5px;line-height:1.5;color:var(--muted)">Your app icon and Amani change with the look you pick.</span></div>`;
+    <div style="display:flex;align-items:center;flex-wrap:wrap;gap:12px 16px;padding:14px 16px;border-radius:var(--r-md)" class="pn-strong"><span style="display:block;width:64px;height:64px;flex:none">${KV.flow(t, 64)}</span><span style="display:block;width:64px;height:64px;flex:none">${KV.amani(t, 64, { round: true })}</span><span class="help" style="margin:0;font-size:14.5px;line-height:1.5;color:var(--muted);flex:1 1 100%;min-width:0">Your app icon and Amani change with the look you pick.</span></div>`;
 }
 function obThemeUpdate() { const sl = $('#ob-theme-slot'); if (sl) { sl.innerHTML = obThemeHtml(); sl.classList.add('noanim'); } }
 function crowInner(c) {
@@ -1417,12 +1418,20 @@ document.addEventListener('submit', (ev) => {
   if (!v && !q) return;
   if (!v) v = 'Explain this simply';
   i.value = ''; attached = '';
+  i.blur(); /* close the keyboard so the answer and the new suggestions are fully visible */
   askTutor(v, v, q);
 });
 document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && tutorFull) { setFull(false); return; } if (ev.key === 'Escape' && tutorOpen && route.name === 'lesson' && window.innerWidth < 1180) { tutorOpen = false; renderTutor(); renderTop(); } });
 document.addEventListener('scroll', (ev) => { if (ev.target && ev.target.id === 'scroll') onScroll(); }, true);
-let rz = 0;
-window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() => { renderTop(); renderTutor(); }, 120); });
+let rz = 0, lastW = window.innerWidth;
+/* A phone keyboard only changes the height. Rebuilding the chat then would drop the text box and close the keyboard, so only a real width change redraws. */
+window.addEventListener('resize', () => {
+  clearTimeout(rz);
+  rz = setTimeout(() => { if (window.innerWidth === lastW) return; lastW = window.innerWidth; renderTop(); renderTutor(); }, 120);
+});
+/* While typing on a phone, give the chat the room: hide the status lines and fold the suggestions. */
+document.addEventListener('focusin', (e) => { if (e.target && e.target.id === 'tin') { const t = $('#tutor'); if (t) t.classList.add('typing'); setTimeout(() => { const m = $('#msgs'); if (m) m.scrollTop = m.scrollHeight; }, 250); } });
+document.addEventListener('focusout', (e) => { if (e.target && e.target.id === 'tin') { const t = $('#tutor'); if (t) t.classList.remove('typing'); } });
 
 /* ---------------- Select text: a small action pop-up (lessons and Amani's answers) ---------------- */
 const SEL = { t: 0, txt: '' };
