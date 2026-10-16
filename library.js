@@ -45,7 +45,7 @@ function cover(p) {
   return `<div class="cvwrap" data-title="${a.esc((p.title + ' ' + (p.subtitle || '')).toLowerCase())}" data-st="${st.state}"><button class="cover raised" data-act="openpack" data-id="${p.id}">
     <span class="cv-art" style="--c1:${c[0]};--c2:${c[1]}"><span class="cv-mono">${a.esc((p.title.match(/[A-Za-z0-9]/) || ['K'])[0].toUpperCase())}</span><span class="cv-badge">${lab}</span></span>
     <span class="cv-body"><b>${a.esc(p.title)}</b><span class="s">${a.esc(p.level || '')} · ${st.total} lessons · about ${p.estimatedHours || '?'} h</span>
-      <span class="bar"><i style="width:${st.total ? Math.round(st.n / st.total * 100) : 0}%"></i></span><span class="s">${st.state === 'done' ? 'Finished' : st.state === 'going' ? st.n + ' of ' + st.total + ' done' : 'Not started'}</span></span></button>${del}</div>`;
+      <span class="bar"><i style="width:${st.total ? Math.round(st.n / st.total * 100) : 0}%"></i></span><span class="s">${p.building ? (window.KVBuild && window.KVBuild.building && window.KVBuild.building(p.id) ? 'Still building: ' + p.building.done + ' of ' + p.building.total + ' lessons ready' : 'Unfinished: ' + p.building.done + ' of ' + p.building.total + ' lessons') : st.state === 'done' ? 'Finished' : st.state === 'going' ? st.n + ' of ' + st.total + ' done' : 'Not started'}</span></span></button>${del}</div>`;
 }
 function shelf(title, sub, packs, empty) {
   const a = A();

@@ -1540,6 +1540,7 @@ window.KVApp = {
   PROV, PROV_TOP, PROV_ALT, cloudCfg, cloudFetch, localModelList, activeModelName, tutorReady, showOv, studio, get DESK() { return DESK; }, inline, renderMd, parseBlocks, plainText,
   askTutor, chat, clearErrors, afterTutorChange, llm, switchToOffline, applyTheme, resolvedTheme, sleep, shuffle, get version() { return APP_VERSION; }, get busy() { return busy; },
   openTutor() { tutorOpen = true; renderTop(); renderTutor(); },
+  openProvider(id) { cloudOpen = id; go('me'); setTimeout(() => { const e = document.querySelector('[data-p="' + id + '"]'); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'center' }); }, 350); },
   openSetup() { setupOpen = true; renderSetup(); refreshDesk(); }, defaults, renderBrand, netErr,
   addPack(p) { const i = PACKS.findIndex((x) => x.id === p.id); if (i >= 0) PACKS[i] = p; else PACKS.push(p); }, removePack(id) { const i = PACKS.findIndex((x) => x.id === id); if (i >= 0) PACKS.splice(i, 1); if (S.activePack === id) S.activePack = PACKS[0] ? PACKS[0].id : null; save(); },
   setActivePack(id) { S.activePack = id; save(); FACTS = null; }

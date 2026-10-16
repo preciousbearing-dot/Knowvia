@@ -784,3 +784,16 @@ body.kb-typing #bpill:not(.moved){display:none}
  .mrow .grow{min-width:0}.mrow b{overflow-wrap:anywhere}
  .mrow .badge{grid-column:2;justify-self:start;margin:0}
 }
+
+/* ---- v0.6 Build Engine 2 ---- */
+.ready .rd-top{display:flex;align-items:center;gap:12px}.ready h2{margin:0;font-size:17px}
+.rd-meter{display:inline-flex;gap:5px;flex:none}.rd-meter i{width:10px;height:26px;border-radius:5px;background:var(--line,rgba(127,127,127,.25));display:block}
+.ready.good .rd-meter i.on{background:var(--ok,#2fa36b)}.ready.low .rd-meter i.on{background:var(--warn,#e0a030)}
+.rd-rec{margin-top:6px}.ready .row-actions{margin-top:10px}
+.analyzing{display:flex;align-items:center;gap:14px}.analyzing .spin{flex:none}
+.iv-sum{list-style:none;margin:8px 0 12px;padding:0;display:grid;gap:8px}
+.iv-sum li{display:grid;grid-template-columns:1fr;gap:2px;padding:10px 12px;border-radius:var(--r-md,14px);background:var(--inset,rgba(127,127,127,.08))}
+.iv-sum li span{font-size:13px;opacity:.7}.iv-sum li b{font-size:16px}.iv-sum li em{font-size:12px;font-style:normal;opacity:.65}
+.plan-list{display:grid;gap:14px;margin-top:12px}.plan-mod h3{margin:0 0 6px;font-size:16px}
+.plan-mod ol{margin:0;padding-left:22px;display:grid;gap:6px}.plan-mod li{line-height:1.35}.plan-mod li .s{display:block;font-size:13px;opacity:.7}
+.unfin{margin-bottom:14px}.rep li{margin:4px 0}
