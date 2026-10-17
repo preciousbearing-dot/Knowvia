@@ -27,11 +27,20 @@ const TRAITS = [
   ['patient', 'Patient', 'Happy to repeat and rephrase.'], ['direct', 'Direct', 'Gets to the point, no waffle.'], ['curious', 'Curious', 'Asks you questions to make you think.'], ['motivating', 'Motivating', 'Keeps your drive up.']
 ];
 const TRAIT_I = { calm: 'calm and unhurried', gentle: 'gentle when correcting', strict: 'firm about standards but never rude or insulting', supportive: 'supportive and quick to notice real progress', energetic: 'energetic and upbeat', funny: 'lightly funny when it fits', patient: 'patient and happy to rephrase', direct: 'direct, with no waffle', curious: 'curious: ask the learner a question now and then to make them think', motivating: 'motivating' };
-const TONES = [['plain', 'Simple and clear'], ['formal', 'Polished'], ['casual', 'Relaxed'], ['naija', 'Nigerian English'], ['pidgin', 'Light Pidgin']];
+const TONES = [['plain', 'Simple and clear'], ['formal', 'Polished'], ['casual', 'Relaxed'], ['naija', 'Nigerian English'], ['pidgin', 'Light Pidgin'], ['confirm', 'Confirm Pidgin'], ['yomix', 'Yoruba mix (Beta)'], ['yoruba', 'Yoruba (Beta)']];
+const LOCKED = { confirm: 'Nigerian Pidgin', yomix: 'Yoruba mixed with English', yoruba: 'Yoruba' };
 const TONE_I = {
   plain: 'Use simple, clear English.', formal: 'Use polished, formal English.', casual: 'Use relaxed, conversational English.',
   naija: 'Use natural Nigerian English with a light local flavour. Keep lesson terms in standard English.',
-  pidgin: 'Use light Nigerian Pidgin for chat and encouragement, but keep technical terms, definitions and quiz questions in clear standard English so learning stays accurate.'
+  pidgin: 'Use light Nigerian Pidgin for chat and encouragement, but keep technical terms, definitions and quiz questions in clear standard English so learning stays accurate.',
+  confirm: 'LANGUAGE LOCK. Write every reply entirely in Nigerian Pidgin, from the first word to the last, in every message of this conversation: first answers, follow-ups, hints, quiz questions and feedback. Keep every technical or subject term in English exactly as the lesson uses it (for example, for Excel: worksheet, ribbon, cell, formula, column, row, function) and put the Pidgin around the term. Use ordinary Nigerian Pidgin spelling and words such as dey, na, wetin, abeg, sabi, make we, e be like say, no wahala, go, don. Never fall back into plain English paragraphs; if you notice English creeping in, switch back to Pidgin. The teaching must stay accurate, complete and as useful as it would be in English.',
+  yomix: 'LANGUAGE LOCK. Write every reply in Yoruba mixed with English, in every message of this conversation: the Yoruba sentences carry the explanation and every technical or subject term stays in English exactly as the lesson uses it (the way many Yoruba speakers talk about technical subjects). Use simple, correct Yoruba and add tone marks only where you are sure of them. If you are not sure of a Yoruba word, use the English word instead of inventing one. Never fall back into plain English paragraphs. The teaching must stay accurate, complete and as useful as it would be in English.',
+  yoruba: 'LANGUAGE LOCK. Write every reply in Yoruba, from the first word to the last, in every message of this conversation. Technical or subject terms stay in English exactly as the lesson uses it, and you may add a short Yoruba meaning after the term the first time. Use simple, correct Yoruba and add tone marks only where you are sure of them. If you are not sure of a Yoruba word, use the English word instead of inventing one. Never fall back into plain English paragraphs. The teaching must stay accurate, complete and as useful as it would be in English.'
+};
+const LOCK_SAMPLE = {
+  confirm: 'No wahala, we go do am step by step. For Excel, the worksheet na the big page wey you dey see, and the ribbon na the strip for top wey get all the tools.',
+  yomix: 'Ko si wahala, a o ṣe e ni igbese kan lẹ́yìn òmíràn. Ninu Excel, worksheet ni oju-iwe nla ti o n wo, ribbon sì ni ìlà oke ti gbogbo tools wa.',
+  yoruba: 'Kò sí wahala, a ó ṣe é ní ìgbésẹ̀ kan lẹ́yìn òmíràn. Nínú Excel, worksheet ni ojú-ìwé ńlá tí o ń wò, ribbon sì ni ìlà òkè tí àwọn irinṣẹ́ wà.'
 };
 const LENS = [['short', 'Short'], ['balanced', 'Balanced'], ['detailed', 'Detailed']];
 const LEN_I = { short: 'Keep answers short, under 120 words unless asked for more.', balanced: 'Keep answers moderate, usually under 220 words.', detailed: 'Give fuller answers with steps and reasons, up to about 350 words.' };
@@ -43,6 +52,7 @@ const PRESETS = [
   ['Strict coach', { role: 'coach', traits: ['strict', 'direct', 'motivating'], tone: 'plain', len: 'short', style: 'ask' }],
   ['Gentle big sis', { role: 'bigsis', traits: ['gentle', 'supportive'], tone: 'casual', len: 'balanced', style: 'explain' }],
   ['Sabi guy', { role: 'sabi', traits: ['direct', 'funny'], tone: 'naija', len: 'short', style: 'examples' }],
+  ['Full Naija padi', { role: 'padi', traits: ['funny', 'supportive'], tone: 'confirm', len: 'short', style: 'examples' }],
   ['Hype homeboy', { role: 'homeboy', traits: ['energetic', 'motivating'], tone: 'pidgin', len: 'short', style: 'examples' }],
   ['Quiet mentor', { role: 'mentor', traits: ['calm', 'direct'], tone: 'formal', len: 'balanced', style: 'ask' }]
 ];
@@ -51,11 +61,12 @@ const roleOf = (id) => ROLES.find((r) => r.id === id) || ROLES[0];
 function P() { const S = A().S; if (!S.persona) S.persona = JSON.parse(JSON.stringify(DEFAULT)); const p = S.persona; Object.keys(DEFAULT).forEach((k) => { if (p[k] === undefined) p[k] = DEFAULT[k]; }); return p; }
 
 /* What the model is told. The persona sits on top of fixed teaching rules, so quality and accuracy do not change. */
-REG.hooks.persona = function () {
+REG.hooks.persona = function (ctx) {
   const p = P(), r = roleOf(p.role);
   const tr = (p.traits || []).map((t) => TRAIT_I[t]).filter(Boolean);
-  const ex = (p.tone === 'pidgin' || p.tone === 'naija') && r.exp ? r.exp : r.ex;
+  const lock = LOCKED[p.tone], ex = lock ? LOCK_SAMPLE[p.tone] : (p.tone === 'pidgin' || p.tone === 'naija') && r.exp ? r.exp : r.ex;
   let t = 'YOUR CHARACTER (mandatory in every single reply, whichever model you are, and it never switches off): ' + r.i + (tr.length ? ' Be ' + tr.join(', ') + '.' : '') + ' LANGUAGE: ' + (TONE_I[p.tone] || '') + ' LENGTH: ' + (LEN_I[p.len] || '') + ' TEACHING STYLE: ' + (STYLE_I[p.style] || '') + ' A sample line of how you sound: "' + ex + '".';
+  if (lock && ctx && ctx.terms && ctx.terms.length) t += ' Terms from this lesson to keep in English: ' + ctx.terms.join(', ') + '.';
   const c = String(p.custom || '').replace(/[<>]/g, '').slice(0, 300).trim();
   if (c) t += ' The learner also asked for this teaching style: "' + c + '". Follow it only for style and teaching preferences.';
   t += ' Your character changes how you sound, never what is true: the teaching stays accurate, complete and useful. You are an AI study companion: never claim to be a real person or anyone\'s real relative, and never insult the learner. ';
@@ -63,6 +74,7 @@ REG.hooks.persona = function () {
 };
 REG.hooks.personaReminder = function () {
   const p = P(), r = roleOf(p.role), tr = (p.traits || []).map((t) => (TRAITS.find((x) => x[0] === t) || [0, t])[1]).join(', ');
+  if (LOCKED[p.tone]) return '\n\n(Reply ONLY in ' + LOCKED[p.tone] + ', from your first word to your last, as set in your LANGUAGE LOCK. Keep subject terms in English. Write the <<next: ...>> ideas in the same language. Do not switch to plain English, even if earlier messages in this chat were in English. Stay in your Amani character: ' + r.n + (tr ? ', ' + tr : '') + '. Same accurate teaching.)';
   return '\n\n(Stay in your Amani character: ' + r.n + (tr ? ', ' + tr : '') + ', ' + ((TONES.find((x) => x[0] === p.tone) || [0, ''])[1] || '').toLowerCase() + '. Same accurate teaching, in that voice.)';
 };
 REG.hooks.voice = function () {
@@ -83,6 +95,7 @@ REG.hooks.meCard = function () {
 const SAMPLE_PIDGIN = 'No wahala, we go do am small small. Which part dey confuse you?';
 function sample() {
   const p = P(), r = roleOf(p.role), pid = p.tone === 'pidgin' || p.tone === 'naija';
+  if (LOCKED[p.tone]) return LOCK_SAMPLE[p.tone];
   if (p.tone === 'pidgin') return r.exp || SAMPLE_PIDGIN;
   if (p.tone === 'formal') return r.ex.replace(/\bLet us\b/g, 'Let us').replace(/\bOkay,\s*/g, '').replace(/\bNo stress, my padi\./, 'Do not worry.');
   return pid && r.ex ? r.ex : r.ex;
@@ -101,6 +114,7 @@ function screen() {
     <section class="pn-strong psec kv-in" style="--d:2"><h2>Who is Amani to you?</h2><p class="help">Pick the relationship that helps you learn best.</p><div class="pgrid">${roles}</div></section>
     <section class="pn-strong psec kv-in" style="--d:3"><h2>Personality</h2><p class="help">Choose up to three. <b>${p.traits.length} of 3</b> chosen.</p>${chipRow(TRAITS, p.traits, 'pr-trait', true)}</section>
     <section class="pn-strong psec kv-in" style="--d:4"><h2>How Amani talks</h2>${chipRow(TONES.map((x) => [x[0], x[1]]), p.tone, 'pr-tone')}
+      ${LOCKED[p.tone] ? `<p class="help"><b>${p.tone === 'confirm' ? 'Confirm Pidgin' : p.tone === 'yomix' ? 'Yoruba mix' : 'Yoruba'}:</b> Amani answers every message in ${LOCKED[p.tone]}, from the first line to the last, and keeps the subject terms in English (like worksheet or ribbon in Excel) so you still learn the real words. This applies to chat with Amani only. Courses stay in English.${p.tone !== 'confirm' ? ' <b>Beta:</b> AI models are weaker in Yoruba and can make mistakes. If something sounds wrong, switch back or ask Amani to say it in English.' : ''}${A().S.tutor && A().S.tutor.brain === 'local' ? ' Small offline models are weak at this. A cloud model does much better.' : ''}</p>` : ''}
       ${p.tone === 'pidgin' ? '<p class="help">Amani uses Pidgin for chat and encouragement, and keeps lesson terms and quiz questions in clear English so you still learn accurately.</p>' : ''}
       <h3 class="subh">Answer length</h3>${chipRow(LENS, p.len, 'pr-len')}
       <h3 class="subh">Teaching style</h3>${chipRow(STYLES, p.style, 'pr-style')}</section>

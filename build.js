@@ -779,7 +779,7 @@ function assemble(j, k) {
     let m = mods.find((x) => x.title === L.module); if (!m) { m = { id: 'm' + (mods.length + 1), title: L.module, lessons: [] }; mods.push(m); }
     const id = 'l' + (i + 1), d = j.done_[i] || {};
     const minutes = Math.max(3, Math.round((d.words || 0) / 170) + 2);
-    const les = { id, title: L.title, subtitle: L.subtitle, minutes, outcomes: L.outcomes, body: j.lessons[i] || '' };
+    const les = { id, title: L.title, subtitle: L.subtitle, minutes, outcomes: L.outcomes, terms: (L.terms || []).slice(0, 8), body: j.lessons[i] || '' };
     if ((d.videos || []).length) les.videos = d.videos; if ((d.refs || []).length) les.refs = d.refs;
     m.lessons.push(les);
     const qs = (j.qz[i] || {}).quiz || [], cs = (j.qz[i] || {}).cards || [];

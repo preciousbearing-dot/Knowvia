@@ -338,7 +338,8 @@ function lessonHtml(l, idx, total) {
 let route = { name: 'home' };
 let curHash = '';
 try { curHash = location.hash || ''; } catch (e) { curHash = ''; }
-const navStack = [];
+const navStack = [], navTut = [];
+function reopenTutor(tt) { if (tt) { tutorOpen = true; tutorFull = !!tt.full; renderTop(); renderTutor(); } }
 function parseHash() {
   const h = (curHash || '').replace(/^#\/?/, '').split('/');
   const n = h[0] || 'home';
@@ -348,18 +349,18 @@ function parseHash() {
 }
 function go(path) {
   const h = '#/' + path;
-  navStack.push(curHash); if (navStack.length > 50) navStack.shift();
+  navStack.push(curHash); navTut.push(tutorOpen ? { full: tutorFull } : null); if (navStack.length > 50) { navStack.shift(); navTut.shift(); }
   curHash = h;
   try { if (location.hash !== h) location.hash = h; } catch (e) { /* hash may be blocked in some frames */ }
   onRoute();
 }
 function goBack() {
   if (!navStack.length) { go('home'); return; }
-  curHash = navStack.pop();
+  curHash = navStack.pop(); const tt = navTut.pop();
   try { location.hash = curHash; } catch (e) {}
-  onRoute();
+  onRoute(); reopenTutor(tt);
 }
-window.addEventListener('hashchange', () => { let h = ''; try { h = location.hash; } catch (e) {} if (h && h !== curHash) { curHash = h; onRoute(); } });
+window.addEventListener('hashchange', () => { let h = ''; try { h = location.hash; } catch (e) {} if (h && h !== curHash) { if (navStack.length && navStack[navStack.length - 1] === h) { navStack.pop(); const tt = navTut.pop(); curHash = h; onRoute(); reopenTutor(tt); } else { curHash = h; onRoute(); } } });
 
 /* ---------------- Theme ---------------- */
 const mqDark = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
@@ -766,7 +767,8 @@ function chat() { const k = chatKey(); if (!S.chats[k]) S.chats[k] = []; return 
 function tutorContext() {
   if (route.name === 'lesson') {
     const l = lessonById(route.id), ls = lessons();
-    return { title: l.title, n: ls.findIndex((x) => x.id === l.id) + 1, text: (l.title + '\n' + l.subtitle + '\n\n' + plainText(l.body)).slice(0, 7000) };
+    const terms = (l.terms && l.terms.length ? l.terms : Array.from(new Set((String(l.body || '').match(/\*\*([^*\n]{2,40})\*\*/g) || []).map((x) => x.replace(/\*/g, '').trim())))).slice(0, 14);
+    return { title: l.title, n: ls.findIndex((x) => x.id === l.id) + 1, terms, text: (l.title + '\n' + l.subtitle + '\n\n' + plainText(l.body)).slice(0, 7000) };
   }
   if (route.name === 'home' && pack()) {
     const p = pack(), ls = lessons();
@@ -906,7 +908,7 @@ function renderTutor() {
 }
 function systemPrompt(ctx) {
   const who = 'You are Amani, a study companion inside the learning app Knowvia. ';
-  const persona = REG.hooks.persona ? REG.hooks.persona() : 'Be warm and patient. ';
+  const persona = REG.hooks.persona ? REG.hooks.persona(ctx) : 'Be warm and patient. ';
   const earlier = 'Earlier replies in this chat may have been written by a different model or in a different voice. From now on, always speak as the character above. ';
   const rules = 'Keep explanations easy to follow. The language, tone and length rules in YOUR CHARACTER above come first. Never invent facts, statistics or sources. Examples in the lesson marked as invented are for practice only. When asked to quiz, ask ONE question with options A, B and C and wait for the reply.\n' +
     'After your answer, add ONE final line in exactly this form: <<next: first idea | second idea | third idea>>. These are things the learner might tap next, written in the learner\'s voice, under 8 words each, and specific to what you just said (a follow-up question, a harder example, or a request to be quizzed). Include a quiz request in most replies. If you just asked a quiz question, give the answer options instead, for example <<next: A | B | C>>. Never mention or explain this line.\n\n';
