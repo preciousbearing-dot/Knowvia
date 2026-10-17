@@ -13,21 +13,25 @@ concurrency:
   group: android-build
   cancel-in-progress: true
 
+env:
+  # llama.cpp is pinned to the exact version the on-device engine was tested with.
+  LLAMA_CPP_SHA: 10b8b7553494f3638da7668cf17cac089229122a
+
 jobs:
   apk:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: 21
 
       - name: Collect the web app
         run: |
@@ -38,18 +42,41 @@ jobs:
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "Knowvia $VERSION"
 
+      - name: Get llama.cpp (pinned)
+        run: |
+          mkdir -p build/llama.cpp
+          cd build/llama.cpp
+          git init -q
+          git remote add origin https://github.com/ggml-org/llama.cpp.git
+          git fetch -q --depth 1 origin "$LLAMA_CPP_SHA"
+          git checkout -q FETCH_HEAD
+          git log -1 --format='llama.cpp %H'
+          echo "KV_LLAMA_DIR=$GITHUB_WORKSPACE/build/llama.cpp" >> "$GITHUB_ENV"
+
+      - name: Android SDK pieces
+        run: |
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses >/dev/null || true
+          "$SDKM" --install "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358" "cmake;3.22.1" >/dev/null
+          ls "$ANDROID_HOME/ndk" "$ANDROID_HOME/cmake"
+
       - name: Create the Android project
         working-directory: build
         run: |
           cp ../android-build/capacitor.config.json .
           npm init -y >/dev/null
-          npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
+          npm install @capacitor/core@8 @capacitor/cli@8 @capacitor/android@8
           npx cap add android
           npx cap sync android
 
-      - name: Add icons, signing key and version
+      - name: Add the on-device engine, icons, signing key and version
         working-directory: build
         run: |
+          # engine: C++ (llama.cpp bridge) and Java (plugin)
+          mkdir -p android/app/src/main/cpp android/app/src/main/java/app/knowvia/study
+          cp ../android-build/native/cpp/* android/app/src/main/cpp/
+          cp ../android-build/native/java/*.java android/app/src/main/java/app/knowvia/study/
+          # icons and signing key
           cp -r ../android-build/res/. android/app/src/main/res/
           cp ../android-build/knowvia-test.jks android/app/knowvia-test.jks
           cat > android/app/src/main/res/values/ic_launcher_background.xml <<'XML'
@@ -58,15 +85,19 @@ jobs:
               <color name="ic_launcher_background">#EFF2FF</color>
           </resources>
           XML
-          python3 ../android-build/patch_gradle.py android/app/build.gradle "${GITHUB_RUN_NUMBER}" "${VERSION}"
+          python3 ../android-build/patch_gradle.py android "${GITHUB_RUN_NUMBER}" "${VERSION}"
 
       - name: Build the APK
         working-directory: build/android
         run: ./gradlew assembleDebug --no-daemon --stacktrace
 
-      - name: Name the file
+      - name: Check the engine is inside the APK
         run: |
-          cp build/android/app/build/outputs/apk/debug/app-debug.apk Knowvia.apk
+          APK=build/android/app/build/outputs/apk/debug/app-debug.apk
+          unzip -l "$APK" | grep -E "lib/arm64-v8a/(libkvllama|libllama|libggml)" | awk '{print $1, $4}'
+          unzip -l "$APK" | grep -q "lib/arm64-v8a/libkvllama.so" || { echo "libkvllama.so is missing"; exit 1; }
+          unzip -l "$APK" | grep -q "libggml-cpu-" || { echo "CPU backends are missing"; exit 1; }
+          cp "$APK" Knowvia.apk
           ls -la Knowvia.apk
 
       - uses: actions/upload-artifact@v4
