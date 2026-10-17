@@ -684,7 +684,7 @@ function screenMe() {
   <section class="setting pn-strong"><h3>Amani, your tutor</h3>
     <p class="help" id="tutor-now">${nowUsing()}</p>
     <p class="sub-h">Offline tutor</p>
-    ${DESK ? `<div id="setup-slot" class="setupbox inset">${setupCardHtml(DESK)}</div>` : `<div class="field"><label for="ol-url">Ollama address</label><input id="ol-url" data-in="url" value="${esc(t.url)}" autocomplete="off"></div>
+    ${DESK ? `<div id="setup-slot" class="setupbox inset">${setupCardHtml(DESK)}</div>` : `${window.KVOffline ? `<div id="of-web-slot" class="setupbox inset">${window.KVOffline.card(null)}</div>` : ''}<div class="field"><label for="ol-url">Ollama address</label><input id="ol-url" data-in="url" value="${esc(t.url)}" autocomplete="off"></div>
       <div class="row-actions"><button class="btn" data-act="checkollama">Check connection</button></div><p class="help" id="ol-status">Not checked yet.</p>
       <details><summary class="help" style="cursor:pointer">Offline tutor not connecting? Read this</summary><p class="help" style="margin-top:8px">1. Make sure Ollama is running (its icon is in the system tray).<br>2. Pull a small model once, for example <b>llama3.2:3b</b>, using <b>ollama pull llama3.2:3b</b>.<br>3. If you opened this app by double-clicking the file, set <b>OLLAMA_ORIGINS</b> to <b>*</b> and restart Ollama. The Knowvia desktop app does this for you.</p></details>`}
     ${(DESK ? DESK.models : ollamaModels).length ? `<div class="field"><label for="ol-model">Offline model</label><select id="ol-model" data-in="model">${(DESK ? DESK.models : ollamaModels).map((m) => `<option value="${esc(m)}" ${m === t.model ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select></div>` : ''}
@@ -1065,6 +1065,7 @@ async function checkOllama() {
 let DESK = null, setupOpen = false, setupPoll = 0;
 async function studio(path, opts) { const r = await fetch('/__studio/' + path, opts); return r.json(); }
 function setupCardHtml(st) {
+  if (window.KVOffline) return window.KVOffline.card(st);
   const j = st.job || {};
   if (j.running) return `<h3>Setting up your tutor</h3><p class="help">${esc(j.msg || 'Working...')}</p><div class="bar" role="progressbar" aria-valuenow="${j.pct || 0}" aria-valuemin="0" aria-valuemax="100"><i style="width:${j.pct || 0}%"></i></div><p class="help">You can keep reading while this runs. It continues if you close this box.</p>`;
   if (j.error) return `<h3>Setup stopped</h3><p class="help">${esc(j.error)}</p><div class="row-actions"><button class="btn primary" data-act="setup">Try again</button></div>`;
@@ -1543,6 +1544,7 @@ window.KVApp = {
   askTutor, chat, clearErrors, afterTutorChange, llm, switchToOffline, applyTheme, resolvedTheme, sleep, shuffle, get version() { return APP_VERSION; }, get busy() { return busy; },
   openTutor() { tutorOpen = true; renderTop(); renderTutor(); },
   openProvider(id) { cloudOpen = id; go('me'); setTimeout(() => { const e = document.querySelector('[data-p="' + id + '"]'); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'center' }); }, 350); },
+  renderSetup, refreshDesk,
   openSetup() { setupOpen = true; renderSetup(); refreshDesk(); }, defaults, renderBrand, netErr,
   addPack(p) { const i = PACKS.findIndex((x) => x.id === p.id); if (i >= 0) PACKS[i] = p; else PACKS.push(p); }, removePack(id) { const i = PACKS.findIndex((x) => x.id === id); if (i >= 0) PACKS.splice(i, 1); if (S.activePack === id) S.activePack = PACKS[0] ? PACKS[0].id : null; save(); },
   setActivePack(id) { S.activePack = id; save(); FACTS = null; }

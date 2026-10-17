@@ -323,7 +323,8 @@ a{color:var(--accent-text)}
 
 /* desktop setup */
 .ov{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;padding:20px;background:var(--scrim)}
-.ov-card{max-width:520px;width:100%;padding:28px;border-radius:var(--r-lg);display:flex;flex-direction:column;gap:14px}
+.ov-card{max-width:520px;width:100%;max-height:calc(100vh - 40px);max-height:calc(100dvh - 40px);overflow-y:auto;overscroll-behavior:contain;padding:28px;border-radius:var(--r-lg);display:flex;flex-direction:column;gap:14px}
+@media(max-width:480px){.ov-card{padding:20px}}
 .ov-card h3,.setupbox h3{margin:0;font-family:var(--fh);font-size:24px;color:var(--hc)}
 .ov-card p.help,.setupbox p.help{margin:0;font-size:15px;line-height:1.6;color:var(--muted)}
 .setupbox{padding:18px;border-radius:var(--r-md);display:flex;flex-direction:column;gap:12px}
@@ -797,3 +798,18 @@ body.kb-typing #bpill:not(.moved){display:none}
 .plan-list{display:grid;gap:14px;margin-top:12px}.plan-mod h3{margin:0 0 6px;font-size:16px}
 .plan-mod ol{margin:0;padding-left:22px;display:grid;gap:6px}.plan-mod li{line-height:1.35}.plan-mod li .s{display:block;font-size:13px;opacity:.7}
 .unfin{margin-bottom:14px}.rep li{margin:4px 0}
+
+/* ---- v0.6 offline tutor ---- */
+.ofcard h3{margin:0 0 6px;font-size:18px}.of-spec{margin:0 0 10px}
+.of-stages{list-style:none;margin:8px 0 12px;padding:0;display:grid;gap:7px}
+.of-stages li{display:flex;align-items:center;gap:9px;font-size:14px;opacity:.55}
+.of-stages li i{width:14px;height:14px;border-radius:50%;border:2px solid currentColor;opacity:.5;display:block;flex:none}
+.of-stages li.done{opacity:.9;color:var(--ok,#2fa36b)}.of-stages li.now{opacity:1;font-weight:700}
+.of-stages li.now i{border-color:var(--accent-text,#4f5ee0);border-top-color:transparent;animation:kvSpin .8s linear infinite;opacity:1}
+.of-stages.chk li{animation:kvSlideIn .4s var(--ease,ease) both}
+.of-meta{display:flex;justify-content:space-between;margin:6px 0 0;font-size:13px}
+.of-wait{margin-top:8px;color:var(--warn,#b9770e)}
+.of-row .of-warn{color:var(--warn,#b9770e)}.of-row.no{opacity:.78}
+.of-act-note{display:block;flex-basis:100%;margin:4px 0 0}
+.badge.ok{background:var(--ok,#2fa36b)}.badge.warn{background:var(--warn,#c98a1b)}.badge.bad{background:var(--bad,#c4493d)}
+.btn.danger{background:var(--bad,#c4493d);color:#fff}
