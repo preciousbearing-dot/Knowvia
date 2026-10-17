@@ -117,7 +117,7 @@ function card(st) {
   let body = '';
   if (sp && !ST.checking) {
     const f = m ? fit(m, sp) : { v: 'ok' }, inst = m && (ST.installed.includes(m.id) || (st && (st.models || []).includes(m.id)));
-    const verdict = ST.web ? `<p class="help">Offline models run inside the Knowvia desktop app on a laptop or computer. They cannot run in a browser or on a phone yet. A phone version is planned. The list below shows what a computer like this could handle.</p>` :
+    const verdict = ST.web ? (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform() ? `<p class="help">Offline models for phones need a built-in engine, which is the next big update to this Android app. For now Amani uses a cloud model when you have internet. The list below shows what a phone like this could handle.</p>` : `<p class="help">Offline models run inside the Knowvia desktop app on a laptop or computer. They cannot run in a browser or on a phone yet. A phone version is planned. The list below shows what a computer like this could handle.</p>`) :
       `<p class="help">${st && st.ready ? 'Add another model, or switch between the ones you have.' : (rec ? '<b>' + esc(rec.name) + '</b> is the strongest model that suits this computer, so it is picked for you.' : '')}</p>`;
     const list = ST.open ? `<p class="sub-h">From lightest to strongest</p><div class="mlist" role="radiogroup">${rows(sp, rec, sel, st)}</div>` : '';
     let act = '';

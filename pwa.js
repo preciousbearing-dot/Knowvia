@@ -5,7 +5,8 @@ const REG = window.KVReg = window.KVReg || { screens: {}, acts: {}, ins: {}, hoo
 ['screens', 'acts', 'ins', 'hooks', 'names'].forEach((k) => { REG[k] = REG[k] || {}; }); REG.ready = REG.ready || [];
 const A = () => window.KVApp;
 const inLauncher = /^(127\.0\.0\.1|localhost)$/.test(location.hostname) && location.port === '8765';
-const web = /^https?:$/.test(location.protocol) && !inLauncher;
+const native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+const web = /^https?:$/.test(location.protocol) && !inLauncher && !native;
 const standalone = () => { try { return matchMedia('(display-mode: standalone)').matches || navigator.standalone === true; } catch (e) { return false; } };
 const ua = navigator.userAgent || '';
 const iOS = /iPhone|iPad|iPod/.test(ua), android = /Android/.test(ua);
@@ -40,6 +41,7 @@ function offlineLine() {
 const prevMe = REG.hooks.meCard;
 REG.hooks.meCard = () => {
   const prev = prevMe ? prevMe() : '';
+  if (native) return prev + `<section class="setting pn-strong"><h3>Knowvia Android app</h3><p class="help">You are using the Knowvia app on this phone. Your courses, progress and keys stay on this device. Lessons, quizzes and flashcards work with no internet.</p><p class="help">To update, download the newest app file from <b>github.com/preciousbearing-dot/Knowvia/releases</b> and install it over this one. Your progress is kept.</p></section>`;
   if (!web) return prev;
   const off = offlineLine();
   return prev + `<section class="setting pn-strong"><h3>Install on this device</h3>${body()}${off ? `<p class="help">${A().esc(off)}</p>` : ''}
