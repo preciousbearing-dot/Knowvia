@@ -220,6 +220,7 @@ function inline(s) {
   s = s.replace(/\u0000(\d+)\u0000/g, (m, i) => esc(hold[+i]));
   return s;
 }
+const botMd = (t) => { const h = renderMd(t); return REG.hooks.cite ? REG.hooks.cite(h) : h; };
 function renderMd(text) {
   const lines = String(text).replace(/\r/g, '').split('\n');
   const out = [];
@@ -344,7 +345,8 @@ function parseHash() {
   const h = (curHash || '').replace(/^#\/?/, '').split('/');
   const n = h[0] || 'home';
   if (n === 'lesson' && h[1] && lessonById(h[1])) return { name: 'lesson', id: h[1] };
-  if (['home', 'learn', 'library', 'practice', 'progress', 'me', 'sources', 'cards', 'weak'].includes(n) || REG.screens[n]) return { name: n };
+  if (['home', 'learn', 'library', 'practice', 'progress', 'me', 'sources', 'cards', 'weak'].includes(n)) return { name: n };
+  if (REG.screens[n]) return { name: n, id: h[1] ? decodeURIComponent(h[1]) : '', sub: h[2] ? decodeURIComponent(h[2]) : '' };
   return { name: 'home' };
 }
 function go(path) {
@@ -528,7 +530,7 @@ function screenHome() {
       ${tile('nav" data-r="practice', I.cards, 'Flashcards', due ? due + ' due today.' : 'Review what you have learned.', 4)}
       ${tile('nav" data-r="progress', I.chart, 'Progress', 'See how far you have come.', 5)}
       ${tile('askamani', I.chat, 'Ask Amani', 'Your study companion, any time.', 6)}
-      ${tile('soon" data-k="upload', I.upload, 'Your own sources', 'Add a PDF or notes and learn from them.', 7, true)}
+      ${tile('nav" data-r="mysources', I.upload, 'Your own sources', 'Add a PDF, link or notes and learn from them.', 7)}
       ${tile('nav" data-r="build', I.spark, 'Build a course', 'Pick a topic and let Amani build it.', 8)}
     </div></div>`;
 }
@@ -793,7 +795,7 @@ function msgHtml(m, i) {
   if (m.role === 'user') return `<div class="bubble user">${m.quote ? `<blockquote class="uq">${esc(m.quote.length > 220 ? m.quote.slice(0, 220) + '…' : m.quote)}</blockquote>` : ''}<span>${esc(m.text)}</span></div>`;
   if (m.err) return `<div class="bubble bot raised err" role="alert">${renderMd(m.text)}<div class="erract"><button class="btn sm primary" data-act="retryask">${ic(I.refresh, 16, 2)}Try again</button>${canGoOffline() ? '<button class="btn sm" data-act="useoffline">Use the offline tutor</button>' : ''}<button class="btn sm" data-act="nav" data-r="me">Tutor settings</button><button class="btn sm" data-act="errdismiss">Dismiss</button></div></div>`;
   const listen = m.text && 'speechSynthesis' in window ? `<button class="listen" data-act="listen" data-i="${i}" aria-label="Listen to this answer" title="Listen">${ic(I.speaker, 16, 1.9)}</button>` : '';
-  return `<div class="bubble bot raised">${m.text ? renderMd(m.text) : '<span class="typing"><i></i><i></i><i></i></span>'}${listen}</div>`;
+  return `<div class="bubble bot raised">${m.text ? botMd(m.text) : '<span class="typing"><i></i><i></i><i></i></span>'}${listen}</div>`;
 }
 /* Amani ends each answer with a hidden line of suggested next taps. We hide it while streaming and read it afterwards. */
 function visibleText(raw) { const i = raw.search(/<<|<\s*$/); return (i < 0 ? raw : raw.slice(0, i)).replace(/\s+$/, ''); }
@@ -941,9 +943,10 @@ async function askTutor(shown, prompt, quote) {
   const history = msgs.slice(0, -2).filter((m) => m.text).slice(-8).map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: (m.quote ? '[Selected passage: "' + m.quote.slice(0, 300) + '"] ' : '') + m.text }));
   const remind = REG.hooks.personaReminder ? REG.hooks.personaReminder() : '';
   const payload = [{ role: 'system', content: systemPrompt(ctx) }].concat(history, [{ role: 'user', content: (prompt || shown) + remind }]);
+  try { const gnd = REG.hooks.ground ? await REG.hooks.ground(prompt || shown, ctx, quote) : ''; if (gnd) payload[0].content += gnd; } catch (e) { /* answer without excerpts */ }
   ctrl = new AbortController();
   const live = () => { const nodes = $$('#msgs .bubble.bot'); return nodes[nodes.length - 1]; };
-  const onChunk = (c) => { raw.v += c; reply.text = visibleText(raw.v); const n = live(); if (n) { n.innerHTML = reply.text ? renderMd(reply.text) : '<span class="typing"><i></i><i></i><i></i></span>'; const m = $('#msgs'); if (m) m.scrollTop = m.scrollHeight; } };
+  const onChunk = (c) => { raw.v += c; reply.text = visibleText(raw.v); const n = live(); if (n) { n.innerHTML = reply.text ? botMd(reply.text) : '<span class="typing"><i></i><i></i><i></i></span>'; const m = $('#msgs'); if (m) m.scrollTop = m.scrollHeight; } };
   let ok = false;
   try {
     if (S.tutor.brain === 'local') await streamOllama(payload, onChunk, ctrl.signal);

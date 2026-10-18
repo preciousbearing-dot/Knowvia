@@ -61,7 +61,8 @@ function screen() {
     <div class="seg inset" role="group" aria-label="Filter">${[['all', 'All'], ['going', 'In progress'], ['done', 'Finished']].map(([v, n]) => `<button data-act="lib-f" data-v="${v}" aria-pressed="${filt.f === v}">${n}</button>`).join('')}</div></div></div>
     ${bj ? `<button class="lib-job pn-strong" data-act="nav" data-r="build"><span class="spin"></span><span><b>Building a course</b><span class="s">${a.esc(bj.title)} · ${bj.pct}%. Tap to watch.</span></span></button>` : ''}
     ${shelf('Official courses', 'Made by Knowvia. They work offline and are updated over time.', off, 'No official courses yet.')}
-    ${shelf('Your own sources', 'Courses made from your PDFs and notes.', up, `<b>Coming in the next version.</b> Add a PDF, like a school textbook, and Amani will turn it into a study path with questions and flashcards.`)}
+    ${shelf('Your own sources', 'Courses made from your PDFs, links and notes. Kept on this device.', up, `Nothing here yet. Add a PDF, a link, a video or some notes and Amani turns it into a study path with questions and flashcards.`)}
+    <div class="row-actions" style="margin-top:-6px"><button class="btn sm primary" data-act="nav" data-r="mysources">${a.ic(a.I.upload, 16, 2)}Add a source</button><button class="btn sm" data-act="nav" data-r="mysources">Manage sources</button></div>
     ${shelf('Built for you', 'Courses Amani built on topics you picked. Stored on this device.', bu, `Nothing here yet. <button class="btn sm primary" data-act="nav" data-r="build" style="margin-left:6px">${a.ic(a.I.spark, 16, 2)}Build a course</button>`)}
     <p class="meta lib-none" id="lib-none" hidden>No course matches your search.</p></div>`;
 }
