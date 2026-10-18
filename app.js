@@ -186,7 +186,7 @@ async function connectCloud(id) {
   setCloudStatus(id, 'bad', last || 'Could not connect.');
 }
 function localModelList() { return (DESK && DESK.models && DESK.models.length) ? DESK.models : (ollamaModels || []); }
-function tutorReady() { return !!((DESK && DESK.ready && localModelList().length) || Object.keys(S.tutor.clouds).some((k) => S.tutor.clouds[k] && S.tutor.clouds[k].ok)); }
+function tutorReady() { return !!((DESK && DESK.ready && localModelList().length) || (isNative() && localModelList().length) || Object.keys(S.tutor.clouds).some((k) => S.tutor.clouds[k] && S.tutor.clouds[k].ok)); }
 function activeModelName() { const t = S.tutor; return t.brain === 'local' ? (t.model || '') : (cloudCfg(t.provider).model || ''); }
 function cloudListHtml() {
   const card = (id, i, alt) => {
@@ -534,7 +534,7 @@ function screenHome() {
 }
 function offlineNudge() {
   if (!S.onboarded || !tutorReady() || localModelList().length || (S.hints.offlineUntil || 0) > Date.now()) return '';
-  if (!DESK && /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent)) return ''; /* phones cannot run the Ollama tutor yet */
+  if (!DESK && !isNative() && /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent)) return ''; /* phone browsers cannot run an offline tutor; the Android app can */
   return `<section class="nudge pn-strong kv-in" style="--d:2"><span class="ico">${ic(I.laptop, 24, 1.8)}</span><div class="grow"><b>Want Amani to work with no internet?</b><p>Set up the offline tutor once. Then Amani keeps helping when your data runs out.</p></div>
     <div class="row-actions"><button class="btn primary sm" data-act="${DESK ? 'setupopen' : 'nav" data-r="me'}">Set it up</button><button class="btn sm" data-act="nudgeoff">Not now</button></div></section>`;
 }
@@ -684,9 +684,9 @@ function screenMe() {
   <section class="setting pn-strong"><h3>Amani, your tutor</h3>
     <p class="help" id="tutor-now">${nowUsing()}</p>
     <p class="sub-h">Offline tutor</p>
-    ${DESK ? `<div id="setup-slot" class="setupbox inset">${setupCardHtml(DESK)}</div>` : `${window.KVOffline ? `<div id="of-web-slot" class="setupbox inset">${window.KVOffline.card(null)}</div>` : ''}<div class="field"><label for="ol-url">Ollama address</label><input id="ol-url" data-in="url" value="${esc(t.url)}" autocomplete="off"></div>
+    ${DESK ? `<div id="setup-slot" class="setupbox inset">${setupCardHtml(DESK)}</div>` : `${window.KVOffline ? `<div id="of-web-slot" class="setupbox inset">${window.KVOffline.card(null)}</div>` : ''}${isNative() ? '' : `<div class="field"><label for="ol-url">Ollama address</label><input id="ol-url" data-in="url" value="${esc(t.url)}" autocomplete="off"></div>
       <div class="row-actions"><button class="btn" data-act="checkollama">Check connection</button></div><p class="help" id="ol-status">Not checked yet.</p>
-      <details><summary class="help" style="cursor:pointer">Offline tutor not connecting? Read this</summary><p class="help" style="margin-top:8px">1. Make sure Ollama is running (its icon is in the system tray).<br>2. Pull a small model once, for example <b>llama3.2:3b</b>, using <b>ollama pull llama3.2:3b</b>.<br>3. If you opened this app by double-clicking the file, set <b>OLLAMA_ORIGINS</b> to <b>*</b> and restart Ollama. The Knowvia desktop app does this for you.</p></details>`}
+      <details><summary class="help" style="cursor:pointer">Offline tutor not connecting? Read this</summary><p class="help" style="margin-top:8px">1. Make sure Ollama is running (its icon is in the system tray).<br>2. Pull a small model once, for example <b>llama3.2:3b</b>, using <b>ollama pull llama3.2:3b</b>.<br>3. If you opened this app by double-clicking the file, set <b>OLLAMA_ORIGINS</b> to <b>*</b> and restart Ollama. The Knowvia desktop app does this for you.</p></details>`}`}
     ${(DESK ? DESK.models : ollamaModels).length ? `<div class="field"><label for="ol-model">Offline model</label><select id="ol-model" data-in="model">${(DESK ? DESK.models : ollamaModels).map((m) => `<option value="${esc(m)}" ${m === t.model ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select></div>` : ''}
     <p class="sub-h">Cloud tutors</p>
     <div class="clouds-slot">${cloudListHtml()}</div>
@@ -969,6 +969,10 @@ async function askTutor(shown, prompt, quote) {
 }
 function errText(e) {
   const m = (e && e.message) || String(e);
+  if (S.tutor.brain === 'local' && isNative()) {
+    if (/HTTP 404/.test(m)) return 'This offline model is not on your phone yet. Open Me, then Offline tutor, and download one. Or pick a cloud model from the menu beside the text box.';
+    return 'The offline tutor on your phone could not answer (' + m.slice(0, 140) + '). Try again, or pick a cloud model from the menu beside the text box.';
+  }
   if (S.tutor.brain === 'local' && DESK) {
     if (/HTTP 404/.test(m)) return 'The tutor model is not installed yet. Open Me and use Tutor setup, or switch the model.';
     return 'The tutor is not running yet. Open Me and press the setup button. It will start or install what is missing.';
@@ -1110,6 +1114,16 @@ async function installUpdate(file) {
     setTimeout(() => location.reload(), 1300);
   } catch (e) { toast('Update failed'); }
 }
+async function initNative() {
+  const D = window.KVDevice; if (!D || !D.native) return;
+  S.tutor.url = location.origin + '/ollama';
+  try {
+    await D.refresh();
+    ollamaModels = D.installedIds();
+    if (ollamaModels.length && (!S.tutor.model || !ollamaModels.includes(S.tutor.model))) S.tutor.model = ollamaModels[0];
+    save();
+  } catch (e) { /* engine not reachable: cloud tutors still work */ }
+}
 async function initDesktop() {
   if (location.protocol !== 'http:' || !/^(127\.0\.0\.1|localhost)$/.test(location.hostname)) return;
   try {
@@ -1145,6 +1159,7 @@ async function permStatus() {
 const OB = ['splash', 'v1', 'v2', 'v3', 'v4', 'v5', 'theme', 'check', 'tutor', 'ready'];
 const ob = { step: 0, replay: false, tab: null, checks: null, rec: null, online: true, dev: null, running: false, done: false, verdict: null, limited: false };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const isNative = () => !!(window.KVDevice && window.KVDevice.native);
 const isDeskOrigin = () => location.protocol === 'http:' && /^(127\.0\.0\.1|localhost)$/.test(location.hostname);
 const obActive = () => !!$('#ob');
 function obEl() { let el = $('#ob'); if (!el) { el = document.createElement('div'); el.id = 'ob'; el.className = 'ob'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true'); el.setAttribute('aria-label', 'Welcome to Knowvia'); document.body.appendChild(el); } return el; }
@@ -1196,7 +1211,7 @@ function obCheckRow(i) { const r = document.getElementById('crow-' + i); if (r) 
 function obVerdictHtml() {
   const d = ob.dev || deviceInfo(), hasEngine = !!DESK;
   let rec = 'cloud', title = 'A cloud tutor is the quickest start', text = '';
-  if (!hasEngine) text = d.phone ? 'Phones answer best with a cloud tutor. It is fast and uses very little battery. Free options are ready for you on the next screen.' : 'The offline tutor engine comes with the Knowvia desktop app. In this browser, a cloud tutor is the quickest way to start, and free options are ready on the next screen.';
+  if (!hasEngine) text = d.phone ? 'Phones answer best with a cloud tutor. It is fast and uses very little battery. Free options are ready for you on the next screen.' + (isNative() ? ' You can also add a small offline tutor later, in Me.' : '') : 'The offline tutor engine comes with the Knowvia desktop app. In this browser, a cloud tutor is the quickest way to start, and free options are ready on the next screen.';
   else if (!ob.online) { rec = 'local'; title = 'Set up the offline tutor'; text = 'You look offline right now, so the offline tutor is the one to set up first. It works with no internet once it is installed.'; }
   else if (d.cores >= 8) { rec = 'local'; title = 'Your device can run the offline tutor well'; text = 'You can set up the offline tutor and keep everything on your device. A cloud tutor is also available if you want stronger answers.'; }
   else text = 'Your laptop can run an offline tutor, but small models answer slowly on a processor like this. A free cloud tutor will feel much faster. You can set up the offline one too, so Amani still works with no internet.';
@@ -1541,7 +1556,7 @@ function returnSplash() {
 window.KVApp = {
   get S() { return S; }, save, saveNow, $, $$, esc, ic, I, go, goBack, toast, get route() { return route; }, renderScreen, renderTutor, renderTop, PACKS, prog, lessons, pack, lessonById,
   PROV, PROV_TOP, PROV_ALT, cloudCfg, cloudFetch, localModelList, activeModelName, tutorReady, showOv, studio, get DESK() { return DESK; }, inline, renderMd, parseBlocks, plainText,
-  askTutor, chat, clearErrors, afterTutorChange, llm, switchToOffline, applyTheme, resolvedTheme, sleep, shuffle, get version() { return APP_VERSION; }, get busy() { return busy; },
+  askTutor, chat, clearErrors, afterTutorChange, setLocalModels(l) { ollamaModels = (l || []).slice(); }, isNative, llm, switchToOffline, applyTheme, resolvedTheme, sleep, shuffle, get version() { return APP_VERSION; }, get busy() { return busy; },
   openTutor() { tutorOpen = true; renderTop(); renderTutor(); },
   openProvider(id) { cloudOpen = id; go('me'); setTimeout(() => { const e = document.querySelector('[data-p="' + id + '"]'); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'center' }); }, 350); },
   renderSetup, refreshDesk,
@@ -1566,6 +1581,7 @@ window.KVApp = {
   renderTop(); renderScreen(); renderTutor(); touchSess();
   if (!S.onboarded) obOpen(S.ob && S.ob.step > 0 ? S.ob.step : 0, false);
   window.KVApp.deskReady = initDesktop();
+  window.KVApp.nativeReady = initNative();
   REG.ready.forEach((f) => { try { f(); } catch (e) { console.error(e); } });
 })();
 })();
