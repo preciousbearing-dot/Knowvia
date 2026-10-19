@@ -274,7 +274,8 @@ REG.acts['src-del-yes'] = async (t, d) => {
 
 /* ---------------- Lessons written from a source, on demand ---------------- */
 const PREP = { key: '', ctrl: null, msg: '', err: '', step: 0, pct: null, note: '' };
-const cloudOk = () => { const a = A(), t = a.S.tutor; return t.brain !== 'local' && !!(a.cloudCfg(t.provider) || {}).key; };
+const cloudOk = () => !!(A().bestCloud && A().bestCloud());
+const cloudSel = () => (A().bestCloud && A().bestCloud()) || undefined;
 function parseJson(s) { s = String(s || '').replace(/```(?:json)?/gi, ''); const i = s.indexOf('{'), j = s.lastIndexOf('}'); if (i < 0 || j <= i) throw new Error('no json'); return JSON.parse(s.slice(i, j + 1)); }
 function lessonPrompt(src, l, text, hasMath) {
   const sys = 'You are Amani, writing one study lesson for a learner from THEIR OWN source, "' + src.title + '". Use ONLY the source text you are given. Never add facts that are not in it.\n' +
@@ -310,14 +311,14 @@ async function prepare(packId, lessonId) {
     PREP.step = 1; PREP.msg = 'Amani is reading ' + src.units[l.src.from - 1].cite + ' to ' + src.units[l.src.to - 1].cite; paintPrep();
     const text = sourceText(src, l.src.from, l.src.to);
     let out = '', tries = 0;
-    while (tries < 2) { tries++; out = String(await a.llm(lessonPrompt(src, l, text, hasMath), { max: 3000, temp: 0.4, signal: PREP.ctrl.signal })); if (out.replace(/\s+/g, ' ').length > 500) break; }
+    while (tries < 2) { tries++; out = String(await a.llm(lessonPrompt(src, l, text, hasMath), { model: cloudSel(), max: 3000, temp: 0.4, signal: PREP.ctrl.signal })); if (out.replace(/\s+/g, ' ').length > 500) break; }
     if (out.replace(/\s+/g, ' ').length < 300) throw new Error('The model returned too little text.');
     PREP.step = 2; PREP.msg = 'Writing practice questions'; paintPrep();
     out = out.replace(/```[a-z]*\n?/g, '').trim(); const tm = out.match(/^#\s+(.+)$/m); let title = l.title; if (tm) { title = tm[1].replace(/[*_`]/g, '').trim().slice(0, 90); out = out.replace(tm[0], '').trim(); }
     if (!/:::keyidea/.test(out)) out += '\n\n:::keyidea\n' + (title || 'Review the main idea above.') + '\n:::';
     let qz = { quiz: [], cards: [] };
     try {
-      const j = parseJson(await a.llm([{ role: 'system', content: 'Return ONLY valid JSON, with no text before or after it.' }, { role: 'user', content: 'Here is a lesson.\n\n' + out.slice(0, 7000) + '\n\nWrite 4 multiple-choice questions and 4 flashcards about it, using only what the lesson says. Each question has "prompt", "options" (4 strings, exactly one correct, three plausible wrong answers), "answer" (index 0 to 3) and "explanation" (one sentence). Each flashcard has "front" and "back". Return {"quiz":[...],"cards":[...]}.' }], { max: 2200, temp: 0.3, signal: PREP.ctrl.signal }));
+      const j = parseJson(await a.llm([{ role: 'system', content: 'Return ONLY valid JSON, with no text before or after it.' }, { role: 'user', content: 'Here is a lesson.\n\n' + out.slice(0, 7000) + '\n\nWrite 4 multiple-choice questions and 4 flashcards about it, using only what the lesson says. Each question has "prompt", "options" (4 strings, exactly one correct, three plausible wrong answers), "answer" (index 0 to 3) and "explanation" (one sentence). Each flashcard has "front" and "back". Return {"quiz":[...],"cards":[...]}.' }], { model: cloudSel(), max: 2200, temp: 0.3, signal: PREP.ctrl.signal }));
       qz.quiz = (j.quiz || []).filter((q) => q && q.prompt && Array.isArray(q.options) && q.options.length >= 3 && Number.isInteger(+q.answer) && +q.answer < q.options.length && q.explanation).slice(0, 5); qz.cards = (j.cards || []).filter((c) => c && c.front && c.back).slice(0, 6);
     } catch (e) { if (e && e.name === 'AbortError') throw e; qz = { quiz: [], cards: [] }; }
     l.title = title; l.body = out; l.ready = true; l.minutes = Math.max(3, Math.round(out.split(/\s+/).length / 170) + 2); l.outcomes = [];
@@ -338,7 +339,7 @@ function prepHtml(l, p) {
   if (l.ready) return `<p class="help srcfrom">Written from <b>${esc(l.subtitle)}</b> of your source. <button class="linkbtn" data-act="src-open" data-id="${esc(p.source.id)}" data-n="${r.from}">Read the original pages</button></p>`;
   if (busy) return `<section class="prep pn-strong" id="prep-card"><h3>Preparing this lesson</h3><p class="help">${esc(PREP.msg)}</p><div class="bar"><i style="width:${PREP.step === 2 ? 80 : PREP.pct != null ? Math.round(5 + PREP.pct * 30) : 40}%"></i></div>${PREP.note ? `<p class="help">${esc(PREP.note)}</p>` : ''}<p class="help">A few minutes at most, depending on the model. You can keep this open.</p><div class="row-actions"><button class="btn" data-act="src-prep-cancel">Cancel</button></div></section>`;
   if (PREP.key) return `<section class="prep pn-strong" id="prep-card"><h3>Another lesson is being prepared</h3><p class="help">Wait for it to finish, then prepare this one.</p></section>`;
-  if (!cloudOk()) return `<section class="prep pn-strong" id="prep-card"><h3>Prepare this lesson</h3><p class="help">Writing a lesson from your source needs a <b>cloud model</b>. Offline models on a phone are too slow and too small for this. Your tutor chat can still use the offline model.</p><div class="row-actions"><button class="btn primary" data-act="nav" data-r="me">Set up a cloud model</button><button class="btn" data-act="src-open" data-id="${esc(p.source.id)}" data-n="${r.from}">Read the original pages</button></div></section>`;
+  if (!cloudOk()) return `<section class="prep pn-strong" id="prep-card"><h3>Prepare this lesson</h3><p class="help">Writing a lesson from your source needs a <b>cloud model</b>. Offline models are for chat only: they are too small and slow to write lessons. Your tutor chat can still use the offline model.</p><div class="row-actions"><button class="btn primary" data-act="nav" data-r="me">Set up a cloud model</button><button class="btn" data-act="src-open" data-id="${esc(p.source.id)}" data-n="${r.from}">Read the original pages</button></div></section>`;
   return `<section class="prep pn-strong" id="prep-card">${PREP.err ? `<p class="help prep-err">${esc(PREP.err)}</p>` : ''}<h3>Prepare this lesson</h3><p class="help">Amani will read <b>${esc(l.subtitle)}</b> of your source and write a lesson with key ideas, worked examples, practice questions and flashcards. It stays on this device.</p><div class="row-actions"><button class="btn primary" data-act="src-prep" data-p="${esc(p.id)}" data-l="${esc(l.id)}">${ic(a.I.spark, 18, 2)}Prepare this lesson</button><button class="btn" data-act="src-open" data-id="${esc(p.source.id)}" data-n="${r.from}">Read the original pages</button></div></section>`;
 }
 function paintPrep() { const a = A(), r = a.route; if (r.name !== 'lesson') return; const el = document.getElementById('prep-card') || document.querySelector('.srcfrom'); const p = a.pack(), l = a.lessonById(r.id); if (!el || !l || !l.src) return; const h = prepHtml(l, p), t = document.createElement('div'); t.innerHTML = h; if (t.firstElementChild) el.replaceWith(t.firstElementChild); }

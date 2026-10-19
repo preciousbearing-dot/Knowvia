@@ -20,7 +20,7 @@ const CATALOG = [
   { id: 'Phi 3.5 Mini', name: 'Phi 3.5 Mini', b: 3.8, bytes: 2393232672, ram: 6, file: 'Phi-3.5-mini-instruct-Q4_K_M.gguf', url: HF('bartowski/Phi-3.5-mini-instruct-GGUF', 'Phi-3.5-mini-instruct-Q4_K_M.gguf'), note: 'Good reasoning for its size. The heaviest one here.' }
 ];
 
-const ST = { specs: null, files: [], loaded: '', dl: { state: 'idle', pct: 0 }, tps: 0, bound: false, loadErr: '' };
+const ST = { specs: null, files: [], loaded: '', dl: { state: 'idle', pct: 0 }, tps: 0, bound: false, loadErr: '', threads: 0, last: null };
 const subs = [];
 const onChange = () => { subs.forEach((f) => { try { f(); } catch (e) { /* ignore */ } }); };
 function P() { try { return native ? ((cap.Plugins && cap.Plugins.KnowviaDevice) || (cap.registerPlugin && (P._c = P._c || cap.registerPlugin('KnowviaDevice')))) : null; } catch (e) { return null; } }
@@ -84,14 +84,16 @@ async function remove(id) {
 
 /* ---- the engine, behind an Ollama-shaped door ---- */
 let chain = Promise.resolve();
+function wantThreads() { try { return (A() && A().S.tutor.threads) || 0; } catch (e) { return 0; } }
 function ensureLoaded(m) {
   const p = P();
   const job = chain.then(async () => {
-    if (ST.loaded === m.file) return;
+    const th = wantThreads();
+    if (ST.loaded === m.file && (!th || th === ST.threads)) return;
     const ram = (ST.specs && ST.specs.ramGb) || 6;
     ST.loadErr = '';
-    await p.load({ file: m.file, nCtx: ram >= 6 ? 4096 : 3072 });
-    ST.loaded = m.file; onChange();
+    await p.load({ file: m.file, nCtx: ram >= 6 ? 4096 : 3072, threads: th, force: ST.loaded === m.file });
+    ST.loaded = m.file; ST.threads = th; onChange();
   });
   chain = job.catch(() => {});
   return job;
@@ -110,15 +112,16 @@ async function chatReq(body, signal) {
   const maxTokens = Math.max(32, Math.min(1500, Math.round(opts.num_predict || 700)));
   const temperature = typeof opts.temperature === 'number' ? opts.temperature : 0.4;
   const rid = 'r' + (++ridN) + '-' + Date.now();
-  const line = (txt, fin) => JSON.stringify({ model: m.id, message: { role: 'assistant', content: txt }, done: !!fin }) + '\n';
-  const track = (r) => { if (r && r.genTokens > 3 && r.genMs > 0) { ST.tps = Math.round((r.genTokens / (r.genMs / 1000)) * 10) / 10; onChange(); } };
+  let fin = '';
+  const line = (txt, done) => JSON.stringify({ model: m.id, message: { role: 'assistant', content: txt }, done: !!done, done_reason: done ? (fin === 'length' ? 'length' : 'stop') : undefined }) + '\n';
+  const track = (r) => { if (r && r.genTokens > 3 && r.genMs > 0) { ST.tps = Math.round((r.genTokens / (r.genMs / 1000)) * 10) / 10; } if (r) ST.last = { promptTokens: r.promptTokens, reusedTokens: r.reusedTokens, promptMs: r.promptMs, genTokens: r.genTokens, genMs: r.genMs, finish: r.finish }; onChange(); };
   keepAwake(true);
   const finish = () => keepAwake(false);
   const run = async (sink) => {
     await ensureLoaded(m);
     if (signal && signal.aborted) throw abortErr();
     streams[rid] = sink;
-    try { const r = await p.generate({ rid, messages, maxTokens, temperature }); track(r); return r; }
+    try { const r = await p.generate({ rid, messages, maxTokens, temperature }); track(r); fin = (r && r.finish) || ''; return r; }
     finally { delete streams[rid]; }
   };
   const onAbort = () => { p.stop({ rid }).catch(() => {}); };
@@ -128,7 +131,7 @@ async function chatReq(body, signal) {
     try { await run((t) => { text += t; }); }
     catch (e) { finish(); if (signal && signal.aborted) throw abortErr(); return json({ error: (e && e.message) || 'The tutor could not answer.' }, 500); }
     finish();
-    return json({ model: m.id, message: { role: 'assistant', content: text }, done: true });
+    return json({ model: m.id, message: { role: 'assistant', content: text }, done: true, done_reason: fin === 'length' ? 'length' : 'stop' });
   }
   const enc = new TextEncoder();
   let closed = false;
@@ -160,5 +163,27 @@ if (native) {
   };
 }
 
-window.KVDevice = { native, CATALOG, state: ST, refresh, download, pause, cancel, remove, installedIds, byId, byFile, subscribe: (f) => subs.push(f), keepAwake };
+/* Try a few processor-thread counts with the loaded model and keep the fastest. Phone chips often have only a couple of fast cores, so more threads is not always faster. */
+async function tune(onProgress) {
+  const p = P(), a = A(); if (!p) throw new Error('The offline engine is not available.');
+  const id = (a.S.tutor.model && installedIds().includes(a.S.tutor.model)) ? a.S.tutor.model : installedIds()[0], m = byId(id);
+  if (!m) throw new Error('Install an offline model first.');
+  const cores = (ST.specs && ST.specs.cores) || 8, cands = Array.from(new Set([2, 3, 4, 6].filter((n) => n <= Math.max(2, cores)))), res = [];
+  const prev = a.S.tutor.threads || 0; keepAwake(true);
+  try {
+    for (let i = 0; i < cands.length; i++) {
+      const t = cands[i];
+      if (onProgress) onProgress({ msg: 'Trying ' + t + ' threads (' + (i + 1) + ' of ' + cands.length + ')', pct: 8 + Math.round(i / cands.length * 85) });
+      await p.load({ file: m.file, nCtx: 2048, threads: t, force: true }); ST.loaded = m.file; ST.threads = t;
+      const rid = 'tune' + t + '-' + Date.now();
+      const r = await p.generate({ rid, messages: [{ role: 'user', content: 'Count from one to twenty in words.' }], maxTokens: 28, temperature: 0 });
+      if (r && r.genTokens > 3 && r.genMs > 0) res.push({ threads: t, tps: r.genTokens / (r.genMs / 1000) });
+    }
+  } finally { keepAwake(false); }
+  res.sort((x, y) => y.tps - x.tps); const best = res[0] || null;
+  const th = best ? best.threads : prev; a.S.tutor.threads = th; a.save();
+  await p.load({ file: m.file, nCtx: ((ST.specs && ST.specs.ramGb) || 6) >= 6 ? 4096 : 3072, threads: th, force: true }); ST.threads = th; if (best) ST.tps = Math.round(best.tps * 10) / 10; onChange();
+  return { best, all: res };
+}
+window.KVDevice = { tune, native, CATALOG, state: ST, refresh, download, pause, cancel, remove, installedIds, byId, byFile, subscribe: (f) => subs.push(f), keepAwake };
 })();

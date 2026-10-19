@@ -24,7 +24,7 @@ function score(k, m) {
 }
 function choices() {
   const a = A(), out = [];
-  a.localModelList().forEach((m) => out.push({ k: 'local', p: '', m, label: m, group: 'On this device · offline', s: score('local', m) }));
+  /* offline models are for chat only: they are never offered for building courses */
   a.PROV_TOP.concat(a.PROV_ALT).forEach((id) => {
     const c = a.cloudCfg(id); if (!c.ok || !c.key) return;
     const list = Array.from(new Set([c.model].concat(c.models || []))).filter(Boolean);
@@ -170,7 +170,7 @@ function setupView() {
       <div class="field"><label>Your level</label>${segs('b-level', BS.level, [['Beginner', 'Beginner'], ['Intermediate', 'Intermediate'], ['Advanced', 'Advanced']])}</div>
       <div class="field"><label>How deep?</label>${segs('b-depth', BS.depth, [['short', 'Short'], ['standard', 'Standard'], ['deep', 'Deep']])}<p class="help">${esc(DEPTH[BS.depth].hint)}${BS.depth === 'standard' ? ' <b>Recommended.</b>' : ''} Amani decides the exact number of modules and lessons from the subject.</p></div>
       ${researchPanel()}</section>
-    <section class="pn-strong psec kv-in" style="--d:2"><h2>Which model should build it?</h2>${noModel ? `<div class="verdict pn-strong"><h3>Connect a model first</h3><p>Amani needs a model to write the course. A free cloud model takes a few minutes to set up.</p><div class="row-actions"><button class="btn primary" data-act="nav" data-r="me">Set up a model</button></div></div>` : `<div class="mlist" role="radiogroup">${auto}${rows}</div>
+    <section class="pn-strong psec kv-in" style="--d:2"><h2>Which model should build it?</h2>${a.localModelList().length ? '<p class="help"><b>Offline models are not offered here.</b> Building a course needs a strong cloud model: offline ones are too small and slow, so they are kept for chat.</p>' : ''}${noModel ? `<div class="verdict pn-strong"><h3>Connect a model first</h3><p>Amani needs a model to write the course. A free cloud model takes a few minutes to set up.</p><div class="row-actions"><button class="btn primary" data-act="nav" data-r="me">Set up a model</button></div></div>` : `<div class="mlist" role="radiogroup">${auto}${rows}</div>
       
       <p class="help">Estimated time with ${esc(cur.label)}: <b>${estimate(cur, n, provState().n)}</b>, depending on how many lessons the subject needs. Keep Knowvia open while it builds. You can use other screens meanwhile.</p>`}</section>
     ${readyCard()}${optionsCard()}${knowBox()}
@@ -344,7 +344,6 @@ function buildPool(j) {
     const seen = new Set(), cloud = [];
     all.filter((c) => c.k === 'cloud').forEach((c) => { if (!seen.has(c.p)) { seen.add(c.p); cloud.push(c); } });
     models = cloud.slice(0, 3);
-    if (!models.length) models = all.filter((c) => c.k === 'local').slice(0, 1);
     if (!models.length) models = [j.model];
   }
   j.pool = models.map((m) => mkWorker(m)); j.model = models[0]; j.modelLabel = poolLabel(j); models.forEach((m) => j.used.add(m.label));

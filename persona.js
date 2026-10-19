@@ -89,6 +89,7 @@ REG.hooks.meCard = function () {
   const a = A();
   return `<section class="setting pn-strong persona-me"><h3>Amani's personality</h3><div class="pme"><span class="av" data-amani="56"></span><div class="grow"><b>${a.esc(roleOf(P().role).n)}</b><p class="help" style="margin:2px 0 0">${a.esc(summary())}</p></div></div>
     <p class="help">Choose who Amani is to you: a teacher, a coach, a padi, a big sister. It changes the voice, never the quality of the teaching.</p>
+    ${a.S.tutor.brain === 'local' ? '<p class="help"><b>Offline right now:</b> Amani uses her default voice on offline models. Your choices are kept and come back on a cloud model.</p>' : ''}
     <div class="row-actions"><button class="btn primary" data-act="nav" data-r="amani">Make Amani yours</button></div></section>`;
 };
 
@@ -107,7 +108,8 @@ function chipRow(items, sel, act, multi) {
 function screen() {
   const a = A(), p = P(), r = roleOf(p.role), esc = a.esc;
   const roles = ROLES.map((x) => `<button class="pcard ${x.id === p.role ? 'on' : ''}" data-act="pr-role" data-v="${x.id}" aria-pressed="${x.id === p.role}"><span class="pi">${esc(x.n[0])}</span><span class="pt"><b>${esc(x.n)}${x.ng ? '<span class="ng">Naija</span>' : ''}</b><span class="s">${esc(x.d)}</span></span></button>`).join('');
-  return `<div class="page persona">
+  const offNote = a.S.tutor.brain === 'local' ? `<section class="pn-strong psec warnbox"><b>You are on an offline model.</b> Offline models are small, so Amani uses her plain default voice there. Everything you set here is kept and comes back as soon as you switch to a cloud model.</section>` : '';
+  return `<div class="page persona">${offNote}
     <section class="phero pn-strong kv-in"><span class="av live" data-amani="84"></span><div class="grow"><p class="eyebrow">Make Amani yours</p><h1>${esc(r.n)}</h1><p class="help" style="margin:4px 0 0">${esc(summary())}</p></div></section>
     <section class="pn-strong psec kv-in" style="--d:1"><h2>Quick styles</h2><p class="help">Start from a ready-made style, then adjust anything below.</p>
       <div class="pchips">${PRESETS.map((x, i) => `<button class="pchip" data-act="pr-preset" data-v="${i}">${esc(x[0])}</button>`).join('')}</div></section>

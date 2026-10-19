@@ -142,7 +142,17 @@ function card(st) {
     const eng = isNat() ? '' : st && !st.installed && !ST.web ? '<p class="help">Setup also installs Ollama first, the engine that runs the model (about 1 GB, once).</p>' : st && st.installed && !st.running ? '<p class="help">Ollama is installed but not running. Setup starts it for you.</p>' : '';
     body = verdict + eng + `<div class="row-actions">${act}<button class="btn" data-act="of-more">${ST.open ? 'Hide the list' : 'See all ' + cat().length + ' models'}</button></div>` + list + (!ST.web ? '<p class="help">The first download needs internet, once. After that the tutor works offline. If the connection drops, the download waits and resumes by itself.</p>' : '');
   }
-  return `<div class="ofcard">${head}${body}</div>`;
+  return `<div class="ofcard">${head}${sp && !ST.checking && window.KVRules ? window.KVRules.compare() : ''}${body}${sp && !ST.checking ? speedBlock(st) : ''}</div>`;
+}
+/* Speed on this phone: what the last answer measured, and a test that picks the best setting for the processor. */
+const TUNE = { running: false, msg: '', res: null };
+function speedBlock(st) {
+  if (!isNat() || !window.KVDevice.installedIds().length) return '';
+  const D = window.KVDevice, tps = D.state.tps, words = tps ? Math.max(0.5, Math.round(tps * 0.75 * 10) / 10) : 0, th = A().S.tutor.threads;
+  if (TUNE.running) return `<div class="speedbox"><h4>Testing speed</h4><p class="help" role="status">${esc(TUNE.msg)}</p><div class="bar"><i style="width:${TUNE.pct || 5}%"></i></div></div>`;
+  const slow = words && words < 2.5;
+  return `<div class="speedbox"><h4>Speed on this phone</h4><p class="help">${words ? 'The last answer ran at about <b>' + words + ' words a second</b>.' : 'No answer has been timed yet.'}${th ? ' Using <b>' + th + ' processor threads</b>.' : ''}${TUNE.res ? ' ' + esc(TUNE.res) : ''}${slow ? ' A smaller model, like Gemma 3 1B or Qwen 2.5 0.5B, answers faster.' : ''}</p>
+    <div class="row-actions"><button class="btn" data-act="of-tune">Test and tune the speed</button></div><p class="help">Takes about a minute. It tries a few settings and keeps the fastest one for this phone.</p></div>`;
 }
 /* The phone's own status, shaped like the laptop launcher's, so one card draws both. */
 function nstat() {
@@ -168,6 +178,16 @@ function paintNative() {
 function paint() { const a = A(); if (isNat()) { paintNative(); return; } if (a.DESK) { if (a.renderSetup) a.renderSetup(); } else { const e = document.getElementById('of-web-slot'); if (e) e.innerHTML = card(null); } }
 
 const R = REG.acts;
+R['of-tune'] = async () => {
+  const a = A(), D = window.KVDevice; if (TUNE.running || !D || !D.tune) return;
+  TUNE.running = true; TUNE.msg = 'Starting'; TUNE.pct = 5; TUNE.res = null; paint();
+  try {
+    const r = await D.tune((p) => { TUNE.msg = p.msg; TUNE.pct = p.pct; paint(); });
+    TUNE.res = r.best ? 'Best result: ' + r.best.threads + ' threads, about ' + Math.round(r.best.tps * 0.75 * 10) / 10 + ' words a second. Saved.' : 'Could not measure the speed. Try again with a model loaded.';
+    if (r.best) { a.S.tutor.threads = r.best.threads; a.save(); }
+  } catch (e) { TUNE.res = (e && e.message) || 'The speed test could not finish.'; }
+  TUNE.running = false; paint();
+};
 R['of-pick'] = (t, d) => { ST.pick = d.v; ST.arm = ''; paint(); };
 R['of-more'] = () => { ST.open = !ST.open; paint(); };
 R['of-dismiss'] = () => { if (isNat()) { window.KVDevice.cancel().then(() => { ST.spec = null; paint(); }); return; }

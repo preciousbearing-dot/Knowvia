@@ -368,6 +368,8 @@ public class KnowviaDevicePlugin extends Plugin {
     public void load(PluginCall call) {
         final String file = safeName(call.getString("file"));
         final int nCtx = call.getInt("nCtx", 4096);
+        final int wantThreads = call.getInt("threads", 0);
+        final boolean force = Boolean.TRUE.equals(call.getBoolean("force", false));
         if (file == null) { call.reject("That model name is not valid."); return; }
         final File mf = new File(modelsDir(), file);
         if (!mf.exists()) { call.reject("This model is not downloaded yet."); return; }
@@ -377,9 +379,9 @@ public class KnowviaDevicePlugin extends Plugin {
                     KvLlama.nativeInit(getContext().getApplicationInfo().nativeLibraryDir);
                     engineInited = true;
                 }
-                if (file.equals(loadedFile)) { JSObject r = new JSObject(); r.put("ok", true); r.put("info", KvLlama.nativeInfo()); call.resolve(r); return; }
+                if (file.equals(loadedFile) && !force) { JSObject r = new JSObject(); r.put("ok", true); r.put("info", KvLlama.nativeInfo()); call.resolve(r); return; }
                 int cores = Runtime.getRuntime().availableProcessors();
-                int threads = Math.max(2, Math.min(4, cores - 2));
+                int threads = wantThreads > 0 ? Math.max(1, Math.min(cores, wantThreads)) : Math.max(2, Math.min(4, cores - 2));
                 loadedFile = "";
                 String err = KvLlama.nativeLoad(mf.getAbsolutePath(), nCtx, threads);
                 if (!err.isEmpty()) { call.reject(err); return; }

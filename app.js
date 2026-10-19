@@ -349,20 +349,95 @@ function parseHash() {
   if (REG.screens[n]) return { name: n, id: h[1] ? decodeURIComponent(h[1]) : '', sub: h[2] ? decodeURIComponent(h[2]) : '' };
   return { name: 'home' };
 }
+/* Screens change the address without adding browser history entries. Knowvia keeps its own trail, so the Android back gesture is handled by the app (see handleBack). */
+function setHash(h) {
+  try { if (location.hash !== h) { if (window.history && history.replaceState) history.replaceState(history.state, '', h); else location.hash = h; } }
+  catch (e) { try { location.hash = h; } catch (e2) { /* hash may be blocked in some frames */ } }
+}
 function go(path) {
   const h = '#/' + path;
+  if (h === curHash) { onRoute(); return; }
   navStack.push(curHash); navTut.push(tutorOpen ? { full: tutorFull } : null); if (navStack.length > 50) { navStack.shift(); navTut.shift(); }
-  curHash = h;
-  try { if (location.hash !== h) location.hash = h; } catch (e) { /* hash may be blocked in some frames */ }
+  curHash = h; setHash(h);
   onRoute();
 }
 function goBack() {
-  if (!navStack.length) { go('home'); return; }
+  while (navStack.length && navStack[navStack.length - 1] === curHash) { navStack.pop(); navTut.pop(); }
+  if (!navStack.length) { goRoot('home'); return; }
   curHash = navStack.pop(); const tt = navTut.pop();
-  try { location.hash = curHash; } catch (e) {}
+  setHash(curHash);
   onRoute(); reopenTutor(tt);
 }
-window.addEventListener('hashchange', () => { let h = ''; try { h = location.hash; } catch (e) {} if (h && h !== curHash) { if (navStack.length && navStack[navStack.length - 1] === h) { navStack.pop(); const tt = navTut.pop(); curHash = h; onRoute(); reopenTutor(tt); } else { curHash = h; onRoute(); } } });
+function goRoot(path) { navStack.length = 0; navTut.length = 0; curHash = '#/' + path; setHash(curHash); onRoute(); }
+window.addEventListener('hashchange', () => { if (history.state && history.state.kv === 'base') return; let h = ''; try { h = location.hash; } catch (e) {} if (h && h !== curHash) { if (navStack.length && navStack[navStack.length - 1] === h) { navStack.pop(); const tt = navTut.pop(); curHash = h; onRoute(); reopenTutor(tt); } else { curHash = h; onRoute(); } } });
+
+/* ---------------- The back button: layered, smart, and kind about leaving ---------------- */
+const TAB_ROOTS = ['learn', 'library', 'practice', 'me', 'progress'];
+let exiting = false, exitAt = 0, exitTimer = 0;
+function hideExitHint() { const e = document.getElementById('exit-hint'); if (e) e.remove(); clearTimeout(exitTimer); }
+function showExitHint() {
+  hideExitHint(); const e = document.createElement('div'); e.id = 'exit-hint'; e.className = 'exit-hint pn-strong'; e.setAttribute('role', 'status');
+  e.innerHTML = '<span>Press back again to exit</span><i class="eh-bar"></i>'; document.body.appendChild(e);
+  exitTimer = setTimeout(() => { hideExitHint(); exitAt = 0; }, 3000);
+}
+function topOverlay() { const l = Array.from(document.querySelectorAll('.ov')).filter((o) => !o.hidden); return l[l.length - 1] || null; }
+/* closes whatever is on top of the screen: a pop-up, the model menu, the text pop-up, the setup sheet, full-screen chat, the chat panel */
+function closeTopLayer() {
+  if ($('#selpop')) { selHide(); return true; }
+  const ov = topOverlay();
+  if (ov) {
+    const btns = Array.from(ov.querySelectorAll('button[data-act]')), safe = btns.find((b) => /close|(^|-)no$|^ovclose$|keep|later|skip/.test(b.dataset.act));
+    if (safe) { safe.click(); return true; }
+    const cancel = btns.find((b) => /cancel|stop/.test(b.dataset.act));
+    if (cancel) { toast('Still working. Press ' + (cancel.textContent.trim() || 'Cancel') + ' to stop.'); return true; }
+    ov.remove(); return true;
+  }
+  if (mdlOpen) { mdlOpen = false; renderTutor(); return true; }
+  if (setupOpen) { setupOpen = false; renderSetup(); return true; }
+  if (tutorFull) { setFull(false); return true; }
+  if (tutorOpen && tutorRoute() && window.innerWidth < 1180) { tutorOpen = false; tutorFull = false; renderTutor(); renderTop(); return true; }
+  return false;
+}
+function flushProgress() {
+  try {
+    if (route.name === 'lesson') { const sc = $('#scroll'); if (sc) { const max = sc.scrollHeight - sc.clientHeight, f = max > 0 ? sc.scrollTop / max : 0, pr = prog(); pr.lessons[route.id] = Object.assign(pr.lessons[route.id] || {}, { scroll: Math.round(f * 1000) / 1000 }); } }
+    clearTimeout(scrollT);
+  } catch (e) { /* nothing to flush */ }
+  saveNow();
+}
+function doExit() {
+  exiting = true; hideExitHint(); flushProgress();
+  try { S.sess = { t: 0, h: '#/home' }; saveNow(); } catch (e) { /* ignore */ }
+  const AP = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
+  if (AP && AP.exitApp) { try { AP.exitApp(); } catch (e) { /* fall through */ } }
+}
+function exitFlow() {
+  if (exitAt && Date.now() - exitAt < 3000) { doExit(); return 'exit'; }
+  exitAt = Date.now(); showExitHint(); return 'handled';
+}
+/* returns 'handled' when the app dealt with it, or 'exit' when the person confirmed leaving */
+function handleBack() {
+  const rs = document.getElementById('rs'); if (rs) { rs.click(); if (rs.isConnected) rs.classList.add('out'); setTimeout(() => rs.remove(), 400); return 'handled'; }
+  if (closeTopLayer()) { hideExitHint(); exitAt = 0; return 'handled'; }
+  if (obActive()) { if (ob.replay) { obClose(); return 'handled'; } if (ob.step >= 2) { obGo(ob.step - 1); return 'handled'; } return exitFlow(); }
+  if (route.name === 'home') return exitFlow();
+  hideExitHint(); exitAt = 0;
+  if (TAB_ROOTS.includes(route.name)) { goRoot('home'); return 'handled'; }
+  if (navStack.length) goBack(); else goRoot('home');
+  return 'handled';
+}
+function initBack() {
+  const AP = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
+  if (AP && AP.addListener) { try { AP.addListener('backButton', () => { if (!exiting) handleBack(); }); } catch (e) { /* the history guard below still works */ } }
+  /* a guard entry in the browser history: the system back gesture lands on it, the app reacts, then the guard is put back */
+  try { history.replaceState({ kv: 'base' }, '', location.href); history.pushState({ kv: 'top' }, '', location.href); } catch (e) { return; }
+  window.addEventListener('popstate', (ev) => {
+    if (exiting) return; if (ev.state && ev.state.kv === 'top') return;
+    if (!ev.state || ev.state.kv !== 'base') { try { history.replaceState({ kv: 'top' }, '', location.href); } catch (e) { /* ignore */ } return; }   /* a plain address change (link or hash), not the back gesture */
+    const r = handleBack();
+    if (r === 'exit') { exiting = true; try { history.back(); } catch (e) { /* ignore */ } } else { try { history.pushState({ kv: 'top' }, '', curHash || '#/home'); } catch (e) { /* ignore */ } }
+  });
+}
 
 /* ---------------- Theme ---------------- */
 const mqDark = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
@@ -778,6 +853,13 @@ function tutorContext() {
   }
   return null;
 }
+/* the best cloud model that is connected, whatever the chat is using. Building courses and writing lessons always use this, never an offline model. */
+function bestCloud() {
+  const t = S.tutor; let ids = [];
+  if (t.brain === 'cloud' && cloudCfg(t.provider).key) ids.push(t.provider);
+  PROV_TOP.concat(PROV_ALT).forEach((id) => { const c = cloudCfg(id); if (c.key && c.ok && !ids.includes(id)) ids.push(id); });
+  const id = ids[0]; if (!id) return null; const c = cloudCfg(id); const m = c.model || (c.models || [])[0]; return m ? { k: 'cloud', p: id, m } : null;
+}
 function nowUsing() {
   const t = S.tutor, m = activeModelName();
   if (!m || (t.brain === 'cloud' && !cloudCfg(t.provider).key)) return 'No tutor is connected yet. Set one up below.';
@@ -786,7 +868,8 @@ function nowUsing() {
 function statusLine() {
   const t = S.tutor, m = activeModelName();
   if (!m || (t.brain === 'cloud' && !cloudCfg(t.provider).key)) return 'No tutor is connected yet. Open the model menu beside the text box, or set one up in Me.';
-  return t.brain === 'local' ? `<span>Using <b>${esc(m)}</b> · offline on this device. Answers stay here.</span>` : `<span>Using <b>${esc(m)}</b> · cloud via ${esc(PROV[t.provider].name)}. Needs internet.</span>`;
+  if (t.brain === 'local') return `<span>Using <b>${esc(m)}</b> · offline on this device. <b>Private, slower, simpler answers.</b> ${REG.hooks.offlineLine ? REG.hooks.offlineLine() : ''}</span>`;
+  return `<span>Using <b>${esc(m)}</b> · cloud via ${esc(PROV[t.provider].name)}. Smartest answers, needs internet.</span>`;
 }
 const SUGG = {};
 function netErr(e) { const m = (e && e.message) || String(e); return !navigator.onLine || /Failed to fetch|NetworkError|getaddrinfo|HTTP 502|HTTP 504|Load failed|ECONN|timed out|network/i.test(m); }
@@ -834,13 +917,13 @@ function chipsHtml(ctx) {
 function menuHtml() {
   const t = S.tutor, loc = localModelList();
   const row = (k, p, m, sel) => `<button class="mi" role="menuitemradio" aria-checked="${sel}" data-act="pickmodel" data-k="${k}" data-p="${p}" data-m="${esc(m)}"><span class="ck">${sel ? ic(I.check, 16, 2.6) : ''}</span><span>${esc(m)}</span></button>`;
-  let h = '<h4>On this device · offline</h4>';
+  let h = '<h4>On this device · offline</h4><p class="mnote">Private, works with no internet. Slower, simpler answers, default Amani voice. Chat only.</p>';
   h += loc.length ? loc.map((m) => row('local', '', m, t.brain === 'local' && t.model === m)).join('') : '<p class="none">No offline model installed yet.</p>';
-  let any = false;
+  let any = false, any1 = false;
   PROV_TOP.concat(PROV_ALT).forEach((id) => {
     const c = cloudCfg(id); if (!c.ok) return; any = true;
     const list = c.models.length ? c.models : [c.model];
-    h += `<h4>${esc(PROV[id].name)} · cloud</h4>` + list.map((m) => row('cloud', id, m, t.brain === 'cloud' && t.provider === id && c.model === m)).join('');
+    h += `<h4>${esc(PROV[id].name)} · cloud</h4>` + (any1 ? '' : '<p class="mnote">Smartest answers and your full Amani voice. Needs internet. Builds courses.</p>') + list.map((m) => row('cloud', id, m, t.brain === 'cloud' && t.provider === id && c.model === m)).join(''); any1 = true;
   });
   if (!any) h += '<h4>Cloud</h4><p class="none">No cloud model connected yet.</p>';
   return h + '<div class="addmore"><button class="btn sm" data-act="nav" data-r="me" style="width:100%">Connect more models</button></div>';
@@ -908,7 +991,13 @@ function renderTutor() {
   const m = $('#msgs'); m.scrollTop = m.scrollHeight;
   renderBrand();
 }
+/* Offline models are small and slow, so they get a short, plain prompt: no personality, a trimmed lesson, short answers. Your Amani style comes back on a cloud model. */
+function leanPrompt(ctx) {
+  const lesson = ctx.home ? 'The learner is on the home screen of a course. Course outline:\n' : 'The learner is reading this lesson. Answer from it. If the answer is not in it, say so in one short sentence, then help briefly.\nLESSON:\n';
+  return 'You are Amani, a friendly study helper in the Knowvia app. Answer in plain, simple English in under 120 words. Be accurate and never invent facts. If asked to quiz, ask ONE question with options A, B and C. If the learner says "Continue", carry on from where your last answer stopped.\n' + lesson + String(ctx.text || '').slice(0, 1500);
+}
 function systemPrompt(ctx) {
+  if (S.tutor.brain === 'local') return leanPrompt(ctx);
   const who = 'You are Amani, a study companion inside the learning app Knowvia. ';
   const persona = REG.hooks.persona ? REG.hooks.persona(ctx) : 'Be warm and patient. ';
   const earlier = 'Earlier replies in this chat may have been written by a different model or in a different voice. From now on, always speak as the character above. ';
@@ -940,8 +1029,9 @@ async function askTutor(shown, prompt, quote) {
   if (quote) { um.quote = quote; prompt = 'The learner selected this passage: "' + quote + '"\nTheir request about it: ' + (prompt || shown) + '\nAnswer about that passage specifically, using the lesson for context.'; }
   msgs.push(um); msgs.push(reply);
   busy = true; chipsOpen = true; renderTutor();
-  const history = msgs.slice(0, -2).filter((m) => m.text).slice(-8).map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: (m.quote ? '[Selected passage: "' + m.quote.slice(0, 300) + '"] ' : '') + m.text }));
-  const remind = REG.hooks.personaReminder ? REG.hooks.personaReminder() : '';
+  const offline = S.tutor.brain === 'local';
+  const history = msgs.slice(0, -2).filter((m) => m.text).slice(offline ? -4 : -8).map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: (m.quote ? '[Selected passage: "' + m.quote.slice(0, 300) + '"] ' : '') + (offline ? m.text.slice(0, 700) : m.text) }));
+  const remind = !offline && REG.hooks.personaReminder ? REG.hooks.personaReminder() : '';
   const payload = [{ role: 'system', content: systemPrompt(ctx) }].concat(history, [{ role: 'user', content: (prompt || shown) + remind }]);
   try { const gnd = REG.hooks.ground ? await REG.hooks.ground(prompt || shown, ctx, quote) : ''; if (gnd) payload[0].content += gnd; } catch (e) { /* answer without excerpts */ }
   ctrl = new AbortController();
@@ -955,6 +1045,7 @@ async function askTutor(shown, prompt, quote) {
     reply.text = sp.text;
     if (!reply.text.trim()) throw new Error('empty');
     SUGG[key] = (sp.next.length >= 2 ? ensureQuiz(sp.next, ctx) : fallbackSugg(ctx, sp.text)).slice(0, 4);
+    if (offline && lastCut) SUGG[key] = ['Continue'].concat(SUGG[key].filter((x) => x !== 'Continue')).slice(0, 4);
     ok = true;
     if (REG.hooks.netOk) REG.hooks.netOk();
   } catch (e) {
@@ -1004,6 +1095,7 @@ function speak(i) {
   speaking = i; const b = document.querySelector('.listen[data-i="' + i + '"]'); if (b) b.classList.add('on');
   window.speechSynthesis.speak(u);
 }
+let lastCut = false;
 async function streamOllama(messages, onChunk, signal) {
   const t = S.tutor;
   if (!t.model) {
@@ -1011,8 +1103,9 @@ async function streamOllama(messages, onChunk, signal) {
     if (info.models.length) { t.model = info.models[0]; save(); } else throw new Error('No model installed');
   }
   const r = await fetch(t.url.replace(/\/$/, '') + '/api/chat', { method: 'POST', signal, headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: t.model, messages, stream: true, options: { temperature: 0.4 } }) });
+    body: JSON.stringify({ model: t.model, messages, stream: true, options: { temperature: 0.3, num_predict: isNative() ? 240 : 520 } }) });
   if (!r.ok) throw new Error('HTTP ' + r.status);
+  lastCut = false;
   const rd = r.body.getReader(), dec = new TextDecoder();
   let buf = '';
   for (;;) {
@@ -1022,7 +1115,7 @@ async function streamOllama(messages, onChunk, signal) {
     while ((nl = buf.indexOf('\n')) >= 0) {
       const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
       if (!line) continue;
-      try { const j = JSON.parse(line); if (j.message && j.message.content) onChunk(j.message.content); } catch (e) {}
+      try { const j = JSON.parse(line); if (j.message && j.message.content) onChunk(j.message.content); if (j.done && j.done_reason === 'length') lastCut = true; } catch (e) {}
     }
   }
 }
@@ -1149,7 +1242,12 @@ async function initDesktop() {
 }
 
 
-function afterTutorChange() { renderTutor(); const n = $('#tutor-now'); if (n) n.innerHTML = nowUsing(); obTutorUpdate(); }
+let lastBrain = null;
+function afterTutorChange() {
+  const was = lastBrain; lastBrain = S.tutor.brain;
+  renderTutor(); const n = $('#tutor-now'); if (n) n.innerHTML = nowUsing(); obTutorUpdate();
+  if (S.onboarded && was && was !== S.tutor.brain && !obActive()) { if (S.tutor.brain === 'local' && REG.hooks.offlineOn) REG.hooks.offlineOn(); else if (S.tutor.brain === 'cloud' && REG.hooks.offlineOff) REG.hooks.offlineOff(); }
+}
 async function permStatus() {
   const el = $('#perm-storage'); if (!el) return;
   try {
@@ -1260,7 +1358,7 @@ function obTutorTop() {
   const rec = ob.rec || 'cloud', tab = ob.tab || rec;
   const locOk = !!(DESK && DESK.ready && localModelList().length), cloudOk = Object.keys(S.tutor.clouds).some((k) => S.tutor.clouds[k] && S.tutor.clouds[k].ok);
   const card = (k, ico, t, d, ok) => `<button class="optcard" data-act="obtab" data-k="${k}" aria-pressed="${tab === k}"><span class="ico">${ic(ico, 22, 1.8)}</span><span><b>${t}${rec === k ? '<span class="badge">Recommended</span>' : ''}${ok ? '<span class="badge ok">Ready</span>' : ''}</b><span class="s">${d}</span></span></button>`;
-  return `<div class="opts2">${card('cloud', I.cloud, 'Cloud tutor', 'Fast and strong. Needs internet. Free options available.', cloudOk)}${card('local', I.laptop, 'Offline tutor', 'Private and works with no internet. Slower on older laptops.', locOk)}</div>`;
+  return `<div class="opts2">${card('cloud', I.cloud, 'Cloud tutor', 'Smartest answers, fast, your full Amani voice, and it builds courses. Needs internet. Free options available.', cloudOk)}${card('local', I.laptop, 'Offline tutor', 'Private, works with no internet. Slower, simpler answers in the default Amani voice. Chat only.', locOk)}</div>`;
 }
 function obTutorPanel() {
   const tab = ob.tab || ob.rec || 'cloud';
@@ -1282,7 +1380,7 @@ function obRender() {
   const nav = (next, label, dis) => `<div class="ob-foot"><button class="btn" data-act="obback" ${ob.step <= 1 ? 'style="visibility:hidden"' : ''}>Back</button><button class="btn primary" id="ob-next" data-act="${next}" ${dis ? 'disabled' : ''}>${label}</button></div>`;
   if (id === 'splash') {
     body = `<div class="ob-body splash" data-act="obnext" id="ob-body"><div class="mk">${KV.flow(t, 132)}</div><div class="wm" aria-label="Knowvia">${'Knowvia'.split('').map((c, i) => `<span style="--i:${i}">${c}</span>`).join('')}</div><div class="tg">A path to knowing</div></div>`;
-    ob.timer = setTimeout(() => { if (OB[ob.step] === 'splash' && obActive()) obGo(1); }, 2900);
+    ob.timer = setTimeout(() => { if (OB[ob.step] === 'splash' && obActive()) obGo(1); }, 4300);
   } else if (/^v\d$/.test(id)) {
     const v = VALS[+id[1] - 1];
     body = `<div class="ob-body" id="ob-body"><div class="ob-wrap"><div class="kv-in">${obScene(v.scene)}</div><p class="eyebrow kv-in" style="--d:1">${v.eye}</p><h1 class="kv-in" style="--d:2">${v.h}</h1><p class="lede kv-in" style="--d:3">${v.p}</p></div></div>`;
@@ -1341,6 +1439,7 @@ document.addEventListener('click', (ev) => {
     case 'cloudopen': cloudOpen = cloudOpen === d.p ? '' : d.p; refreshCloudSlots(); break;
     case 'cloudconnect': { const k = document.getElementById('k-' + d.p); if (k) cloudCfg(d.p).key = k.value.trim(); save(); connectCloud(d.p); break; }
     case 'mdl': mdlOpen = !mdlOpen; renderTutor(); if (mdlOpen) loadMenuModels(); break;
+    case 'tocloud': { const bc = bestCloud(); if (!bc) { go('me'); break; } S.tutor.brain = 'cloud'; S.tutor.provider = bc.p; save(); afterTutorChange(); toast('Amani is back on a cloud model'); break; }
     case 'pickmodel': {
       if (d.k === 'local') { S.tutor.brain = 'local'; S.tutor.model = d.m; }
       else { S.tutor.brain = 'cloud'; S.tutor.provider = d.p; cloudCfg(d.p).model = d.m; }
@@ -1542,24 +1641,24 @@ REG.hooks.switchOffline = () => { if (switchToOffline(true)) { toast('Amani now 
 
 /* ---------------- Coming back to the app ---------------- */
 const RESUME_MS = 30 * 60 * 1000;
-function touchSess() { if (!S.onboarded) return; S.sess = { t: Date.now(), h: curHash || '#/home' }; saveNow(); }
+function touchSess() { if (!S.onboarded || exiting) return; S.sess = { t: Date.now(), h: curHash || '#/home' }; saveNow(); }
 setInterval(() => { if (!document.hidden) touchSess(); }, 15000);
 document.addEventListener('visibilitychange', () => { if (document.hidden) touchSess(); });
 window.addEventListener('pagehide', touchSess);
-function returnSplash() {
+function returnSplash(mode) {
   const t = resolvedTheme(), KV = window.KV; if (!KV) return;
   const el = document.createElement('div'); el.id = 'rs'; el.className = 'ob rs'; el.setAttribute('aria-hidden', 'true');
-  el.innerHTML = `<div class="ob-body splash"><div class="mk">${KV.flow(t, 132)}</div><div class="wm">${'Knowvia'.split('').map((c, i) => `<span style="--i:${i}">${c}</span>`).join('')}</div><div class="tg">A path to knowing</div><p class="rs-hi">Welcome back${S.name ? ', ' + esc(S.name) : ''}</p></div>`;
+  el.innerHTML = `<div class="ob-body splash"><div class="mk">${KV.flow(t, 132)}</div><div class="wm">${'Knowvia'.split('').map((c, i) => `<span style="--i:${i}">${c}</span>`).join('')}</div><div class="tg">A path to knowing</div><p class="rs-hi">${mode === 'resume' ? 'Picking up where you left off' : 'Welcome back'}${S.name ? ', ' + esc(S.name) : ''}</p></div>`;
   document.body.appendChild(el);
   const calm = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const end = () => { if (!el.isConnected || el.classList.contains('out')) return; el.classList.add('out'); setTimeout(() => el.remove(), 520); };
-  el.addEventListener('click', end); setTimeout(end, calm ? 900 : 2500);
+  const t0 = Date.now(), end = () => { if (!el.isConnected || el.classList.contains('out')) return; el.classList.add('out'); setTimeout(() => el.remove(), 700); };
+  el.addEventListener('click', () => { if (Date.now() - t0 > 1800) end(); else if (calm) end(); }); setTimeout(end, calm ? 1400 : 4300);
 }
 
 window.KVApp = {
   get S() { return S; }, save, saveNow, $, $$, esc, ic, I, go, goBack, toast, get route() { return route; }, renderScreen, renderTutor, renderTop, PACKS, prog, lessons, pack, lessonById,
   PROV, PROV_TOP, PROV_ALT, cloudCfg, cloudFetch, localModelList, activeModelName, tutorReady, showOv, studio, get DESK() { return DESK; }, inline, renderMd, parseBlocks, plainText,
-  askTutor, chat, clearErrors, afterTutorChange, setLocalModels(l) { ollamaModels = (l || []).slice(); }, isNative, llm, switchToOffline, applyTheme, resolvedTheme, sleep, shuffle, get version() { return APP_VERSION; }, get busy() { return busy; },
+  askTutor, chat, clearErrors, afterTutorChange, bestCloud, setLocalModels(l) { ollamaModels = (l || []).slice(); }, isNative, llm, switchToOffline, applyTheme, resolvedTheme, sleep, shuffle, get version() { return APP_VERSION; }, get busy() { return busy; },
   openTutor() { tutorOpen = true; renderTop(); renderTutor(); },
   openProvider(id) { cloudOpen = id; go('me'); setTimeout(() => { const e = document.querySelector('[data-p="' + id + '"]'); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'center' }); }, 350); },
   renderSetup, refreshDesk,
@@ -1573,10 +1672,10 @@ window.KVApp = {
   let mode = '';
   if (!S.onboarded) { if (!S.ob || !S.ob.step) { S.theme = 'frost'; S.frostMode = 'light'; S.night = false; } }
   else { const gap = S.sess && S.sess.t ? Date.now() - S.sess.t : Infinity; mode = gap < RESUME_MS ? 'resume' : 'away'; }
-  if (mode === 'resume' && S.sess.h && !/^#\/?(home)?$/.test(S.sess.h)) { curHash = S.sess.h; try { location.hash = curHash; } catch (e) {} window.__resume = true; }
-  else if (mode) { curHash = '#/home'; try { location.hash = '#/home'; } catch (e) {} }
-  applyTheme();
-  if (mode === 'away') returnSplash();
+  if (mode === 'resume' && S.sess.h && !/^#\/?(home)?$/.test(S.sess.h)) { curHash = S.sess.h; setHash(curHash); window.__resume = true; }
+  else if (mode) { curHash = '#/home'; setHash('#/home'); }
+  applyTheme(); lastBrain = S.tutor.brain;
+  if (mode) returnSplash(mode);
   shell();
   route = parseHash();
   if (route.name === 'lesson' && window.__resume) { route.resume = true; window.__resume = false; }
@@ -1585,6 +1684,7 @@ window.KVApp = {
   if (!S.onboarded) obOpen(S.ob && S.ob.step > 0 ? S.ob.step : 0, false);
   window.KVApp.deskReady = initDesktop();
   window.KVApp.nativeReady = initNative();
+  initBack();
   REG.ready.forEach((f) => { try { f(); } catch (e) { console.error(e); } });
 })();
 })();
