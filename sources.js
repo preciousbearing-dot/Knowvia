@@ -5,10 +5,10 @@
 const native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 const KINDS = {
   pdf: { name: 'PDF', unit: 'page' }, docx: { name: 'Word document', unit: 'section' }, pptx: { name: 'PowerPoint', unit: 'slide' }, xlsx: { name: 'Excel sheet', unit: 'rows' },
-  epub: { name: 'EPUB book', unit: 'section' }, text: { name: 'Text', unit: 'part' }, web: { name: 'Website', unit: 'part' }, youtube: { name: 'YouTube video', unit: 'time' }
+  epub: { name: 'EPUB book', unit: 'section' }, photo: { name: 'Photos of pages', unit: 'photo' }, text: { name: 'Text', unit: 'part' }, web: { name: 'Website', unit: 'part' }, youtube: { name: 'YouTube video', unit: 'time' }
 };
-const EXT = { pdf: 'pdf', docx: 'docx', pptx: 'pptx', xlsx: 'xlsx', epub: 'epub', txt: 'text', md: 'text', markdown: 'text', csv: 'text', tsv: 'text', json: 'text', html: 'web', htm: 'web', rtf: 'text', log: 'text' };
-const ACCEPT = '.pdf,.docx,.pptx,.xlsx,.epub,.txt,.md,.csv,.html,.htm,.json';
+const EXT = { pdf: 'pdf', docx: 'docx', pptx: 'pptx', xlsx: 'xlsx', epub: 'epub', txt: 'text', md: 'text', markdown: 'text', csv: 'text', tsv: 'text', json: 'text', html: 'web', htm: 'web', rtf: 'text', log: 'text', jpg: 'photo', jpeg: 'photo', png: 'photo', webp: 'photo', heic: 'photo' };
+const ACCEPT = '.pdf,.docx,.pptx,.xlsx,.epub,.txt,.md,.csv,.html,.htm,.json,.jpg,.jpeg,.png,.webp';
 const LIMIT_MB = 120;
 const uid = () => 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const clean = (s) => String(s || '').replace(/ /g, ' ').replace(/[​-‍﻿]/g, '').replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{3,}/g, '\n\n').trim();
@@ -45,7 +45,15 @@ const Store = {
     const l = listRead().filter((x) => x.id !== src.id);
     l.push({ id: src.id, title: src.title, kind: src.kind, addedAt: src.addedAt, units: src.units.length, chapters: src.chapters.length, chars: src.stats.chars, url: src.url || '', name: src.name || '' }); listWrite(l);
   },
-  async remove(id) { try { await idb('readwrite', (st) => st.delete(id)); } catch (e) { /* ignore */ } cache.delete(id); IDX.delete(id); listWrite(listRead().filter((x) => x.id !== id)); }
+  /* the original PDF or the photos are kept beside the text so pages can be read as images later */
+  putFile: (id, blob) => idb('readwrite', (st) => st.put(blob, 'file:' + id)),
+  getFile: (id) => idb('readonly', (st) => st.get('file:' + id)),
+  putImg: (id, n, blob) => idb('readwrite', (st) => st.put(blob, 'img:' + id + ':' + n)),
+  getImg: (id, n) => idb('readonly', (st) => st.get('img:' + id + ':' + n)),
+  async remove(id) {
+    try { await idb('readwrite', (st) => { st.delete('file:' + id); return st.delete(IDBKeyRange.bound('img:' + id + ':', 'img:' + id + ':\uffff')); }); } catch (e) { /* ignore */ }
+    try { await idb('readwrite', (st) => st.delete(id)); } catch (e) { /* ignore */ } cache.delete(id); IDX.delete(id); closeDoc(id); listWrite(listRead().filter((x) => x.id !== id));
+  }
 };
 
 /* ---------------- Little helpers shared by the readers ---------------- */
@@ -253,8 +261,12 @@ R.pdf = async (buf, ctx) => {
   }
   try { doc.destroy(); } catch (e) { /* ignore */ }
   const notes = [];
-  if (sparse > n * 0.5) throw new SrcError('This PDF looks like scanned pictures of pages, with almost no readable text. Reading scanned pages needs the page-image reader, which is coming in the next stage. For now, use a PDF with real text, or copy the text and use Copied text.', 'scanned');
-  if (sparse > n * 0.1) notes.push(sparse + ' pages have little or no text. They may be pictures, which Knowvia does not read yet.');
+  const scanned = sparse > n * 0.5;
+  if (scanned) {
+    const units0 = pages.map((ls, i) => ({ t: '(This page has not been read yet. It is a picture of a page.)', e: 1, cite: 'p. ' + (i + 1), pg: i + 1, m: 0 }));
+    return { title: metaTitle, units: units0, chapters: n > 12 ? groupChapters(n, n > 200 ? 25 : n > 60 ? 12 : 6, (a, b) => 'Pages ' + a + ' to ' + b) : [], notes: ['This PDF is made of pictures of pages, so there is no text to read yet. Amani reads each page as an image with a cloud model that can see images, when you open a lesson or press Read pages. Pages already read are kept.'], pdfPages: n, scanned: true };
+  }
+  if (sparse > n * 0.1) notes.push(sparse + ' pages have little or no text. They may be pictures or blank pages. Open one and press Read this page as an image if it matters.');
   /* running headers and footers: short lines at the top or bottom that repeat with only the number changing */
   const key = (s2) => s2.replace(/\d+(\.\d+)*/g, '#').replace(/\s+/g, ' ').trim().toLowerCase(), cnt = {};
   pages.forEach((ls) => { const seen = new Set(); ls.slice(0, 2).concat(ls.slice(-2)).forEach((l) => { if (l.t.length > 90) return; const k = key(l.t); if (!seen.has(k)) { seen.add(k); cnt[k] = (cnt[k] || 0) + 1; } }); });
@@ -291,7 +303,7 @@ R.pdf = async (buf, ctx) => {
   }
   chapters = chapters.filter((c) => c.to >= c.from);
   const math = units.filter((u) => u.m).length;
-  if (math) notes.push(math + ' of ' + n + ' pages contain maths or symbols that a text reader garbles (for example matrices and fractions). Knowvia shows those pages with a warning. Reading them as page images is coming in the next stage.');
+  if (math) notes.push(math + ' of ' + n + ' pages contain maths or symbols that a text reader garbles (for example matrices and fractions). Amani reads them as page images when you prepare a lesson, so formulas come out right.');
   const info = await Promise.resolve(null);
   void info;
   return { title: metaTitle, units, chapters, notes, pdfPages: n };
@@ -353,8 +365,16 @@ const NOTE_TOOBIG = 'This file is very large. Knowvia can open it, but it may ta
 async function ingest(input, ctx) {
   ctx = ctx || {}; const cancelled = () => !!(ctx.signal && ctx.signal.aborted); ctx.cancelled = cancelled;
   const prog = ctx.onProgress || (() => {}); ctx.progress = (stage, frac, msg, eta) => prog({ stage, frac, msg, eta });
-  let kind = input.kind, res, name = '', url = '', bytes = 0;
-  if (kind === 'file') {
+  let kind = input.kind, res, name = '', url = '', bytes = 0, keepFile = null; const sid = uid(); let photoBlobs = null;
+  if (kind === 'file' && input.file && detect(input.file) === 'photo') { input = { kind: 'photos', files: [input.file] }; kind = 'photos'; }
+  if (kind === 'photos') {
+    const files = (input.files || []).filter((f) => f && (/^image\//.test(f.type) || detect(f) === 'photo')); if (!files.length) throw new SrcError('Choose at least one photo.', 'empty');
+    if (files.length > 60) throw new SrcError('That is ' + files.length + ' photos. Add up to 60 at a time.', 'big');
+    if (!vision.candidates().length) throw new SrcError('Reading photos needs a cloud model that can see images. Gemini has a free plan that works well: connect it in Me, then add the photos again.', 'novision');
+    kind = 'photo'; photoBlobs = [];
+    for (let i = 0; i < files.length; i++) { if (cancelled()) throw new Cancelled(); ctx.progress('open', 0.03 + 0.12 * (i / files.length), 'Preparing photo ' + (i + 1) + ' of ' + files.length); photoBlobs.push(await shrinkImage(files[i])); }
+    res = { title: 'Photos of pages', units: photoBlobs.map((b, i) => ({ t: '(This photo has not been read yet.)', e: 1, cite: 'photo ' + (i + 1), pg: i + 1 })), chapters: [], notes: [], scanned: true }; bytes = photoBlobs.reduce((a, b) => a + b.size, 0); name = files.length + ' photos';
+  } else if (kind === 'file') {
     const f = input.file; name = f.name; bytes = f.size; kind = detect(f);
     if (!kind) throw new SrcError('Knowvia cannot read "' + f.name + '" yet. It reads PDF, Word (.docx), PowerPoint (.pptx), Excel (.xlsx), EPUB, text, Markdown, CSV and web pages (.html).', 'type');
     if (f.size > LIMIT_MB * 1048576) throw new SrcError('This file is ' + Math.round(f.size / 1048576) + ' MB. The limit is ' + LIMIT_MB + ' MB. Split it into smaller parts and add them one at a time.', 'big');
@@ -362,7 +382,7 @@ async function ingest(input, ctx) {
     ctx.progress('open', 0.02, 'Opening ' + f.name);
     if (kind === 'text') res = await R.text(await f.text());
     else if (kind === 'web') res = await R.web(await f.text());
-    else { const buf = await f.arrayBuffer(); if (cancelled()) throw new Cancelled(); res = await R[kind](buf, ctx); }
+    else { const buf = await f.arrayBuffer(); if (cancelled()) throw new Cancelled(); res = await R[kind](buf, ctx); if (kind === 'pdf') keepFile = f; }
     if (f.size > 40 * 1048576) (res.notes = res.notes || []).push(NOTE_TOOBIG);
   } else if (kind === 'text') {
     const t = String(input.text || ''); if (clean(t).length < 40) throw new SrcError('That is too short to learn from. Paste at least a few sentences.', 'empty');
@@ -377,17 +397,139 @@ async function ingest(input, ctx) {
   ctx.progress('clean', 0.86, 'Tidying the text');
   let units = res.units.filter((u) => u && clean(u.t)); if (!units.length) throw new SrcError('Knowvia could not find any readable text in this.', 'empty');
   units = units.map((u, i) => Object.assign({}, u, { n: i + 1, t: clean(u.t) }));
-  const chars = units.reduce((a, u) => a + u.t.length, 0); if (chars < 120) throw new SrcError('There is almost no readable text here (' + chars + ' characters).', 'empty');
+  const chars = units.reduce((a, u) => a + u.t.length, 0); if (chars < 120 && !res.scanned) throw new SrcError('There is almost no readable text here (' + chars + ' characters).', 'empty');
   let chapters = (res.chapters || []).filter((c) => c.from >= 1 && c.from <= units.length).map((c) => ({ title: clean(c.title) || 'Part', from: c.from, to: Math.min(units.length, c.to || c.from), front: !!c.front }));
   chapters.sort((a, b) => a.from - b.from); chapters.forEach((c, i) => { if (i + 1 < chapters.length && c.to >= chapters[i + 1].from) c.to = chapters[i + 1].from - 1; if (i + 1 < chapters.length && c.to < chapters[i + 1].from - 1) c.to = chapters[i + 1].from - 1; });
   if (chapters.length && chapters[0].from > 1) chapters[0].from = 1; if (chapters.length) chapters[chapters.length - 1].to = units.length;
   chapters = chapters.filter((c) => c.to >= c.from).map((c, i) => Object.assign(c, { id: 'c' + (i + 1) }));
   const ttl = clean(res.title) || clean(name).replace(/\.[a-z0-9]+$/i, '').replace(/_/g, ' ').split(/\s*--\s*/)[0].replace(/[-]+/g, ' ').replace(/\s+/g, ' ').trim() || (kind === 'text' ? clean(units[0].t.split('\n')[0]).slice(0, 60) : 'Untitled source');
-  const src = { id: uid(), v: 1, kind, title: ttl.slice(0, 120), name, url, addedAt: Date.now(), bytes, units, chapters, notes: res.notes || [], extra: res.extra || null, stats: { chars, units: units.length, math: units.filter((u) => u.m).length } };
-  ctx.progress('save', 0.94, 'Saving on this device'); await Store.put(src);
+  const src = { id: sid, v: 2, kind, title: ttl.slice(0, 120), name, url, addedAt: Date.now(), bytes, units, chapters, notes: res.notes || [], extra: res.extra || null, scanned: !!res.scanned, hasFile: false, stats: { chars, units: units.length, math: units.filter((u) => u.m).length } };
+  ctx.progress('save', photoBlobs ? 0.18 : 0.94, 'Saving on this device');
+  try {
+    if (keepFile) { await Store.putFile(sid, keepFile); src.hasFile = true; }
+    if (photoBlobs) { for (let i = 0; i < photoBlobs.length; i++) await Store.putImg(sid, i + 1, photoBlobs[i]); src.hasFile = true; }
+  } catch (e) { src.hasFile = false; src.notes.push('There was no room to keep the original file on this device, so pages cannot be read as images later.'); if (photoBlobs) { try { await Store.remove(sid); } catch (e2) { /* ignore */ } throw new SrcError('There is no room on this device to keep the photos. Free some space and try again.', 'nostore'); } }
+  await Store.put(src);
+  if (photoBlobs) {
+    try {
+      await readPages(sid, units.map((u) => u.n), { signal: ctx.signal, onProgress: (p) => ctx.progress('read', 0.2 + 0.7 * p.frac, p.msg, p.eta) });
+      const fresh = await Store.get(sid), first = (fresh.units.find((u) => u.v && !u.e) || {}).t || '', line = clean(first.split('\n')[0]).replace(/^[#*\s]+/, '').slice(0, 60);
+      if (line.length > 3) { fresh.title = 'Photos: ' + line; await Store.put(fresh); }
+      return fresh;
+    } catch (e) { try { await Store.remove(sid); } catch (e2) { /* ignore */ } throw e; }
+  }
   ctx.progress('index', 0.98, 'Preparing search'); buildIndex(src);
   ctx.progress('done', 1, 'Ready');
   return src;
+}
+
+/* ---------------- Stage two: reading pages as images with a cloud model ---------------- */
+const DOCS = new Map();
+async function pdfDoc(srcId) {
+  if (DOCS.has(srcId)) return DOCS.get(srcId);
+  const f = await Store.getFile(srcId); if (!f) throw new SrcError('The original PDF is not stored on this device, so its pages cannot be read as images. Open the source and press Add the PDF again.', 'nofile');
+  const lib = await getPdf(), buf = await f.arrayBuffer();
+  let doc; try { doc = await lib.getDocument({ data: new Uint8Array(buf), disableFontFace: true, isEvalSupported: false }).promise; } catch (e) { throw new SrcError('The stored PDF could not be opened again.', 'bad'); }
+  DOCS.set(srcId, doc); return doc;
+}
+function closeDoc(srcId) { const d = DOCS.get(srcId); if (d) { try { d.destroy(); } catch (e) { /* ignore */ } DOCS.delete(srcId); } }
+const blobUrl = (b) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(new Error('read')); r.readAsDataURL(b); });
+async function renderPdfPage(doc, no, width, q) {
+  const pg = await doc.getPage(no), v1 = pg.getViewport({ scale: 1 });
+  const scale = Math.max(0.6, Math.min(2.6, (width || 1400) / v1.width, 2300 / v1.height)), vp = pg.getViewport({ scale });
+  const cv = document.createElement('canvas'); cv.width = Math.ceil(vp.width); cv.height = Math.ceil(vp.height);
+  const cx = cv.getContext('2d', { alpha: false }); cx.fillStyle = '#fff'; cx.fillRect(0, 0, cv.width, cv.height);
+  await pg.render({ canvasContext: cx, viewport: vp }).promise; pg.cleanup();
+  const url = cv.toDataURL('image/jpeg', q || 0.76); cv.width = cv.height = 0; return url;
+}
+async function shrinkImage(file, max) {
+  max = max || 1600; let bmp = null;
+  try { bmp = await createImageBitmap(file); } catch (e) { bmp = null; }
+  if (!bmp) { bmp = await new Promise((res, rej) => { const u = URL.createObjectURL(file), im = new Image(); im.onload = () => { URL.revokeObjectURL(u); res(im); }; im.onerror = () => { URL.revokeObjectURL(u); rej(new SrcError('"' + (file.name || 'A photo') + '" could not be opened as a picture.', 'bad')); }; im.src = u; }); }
+  const w = bmp.width || bmp.naturalWidth, h = bmp.height || bmp.naturalHeight, k = Math.min(1, max / Math.max(w, h));
+  const cv = document.createElement('canvas'); cv.width = Math.max(1, Math.round(w * k)); cv.height = Math.max(1, Math.round(h * k));
+  const cx = cv.getContext('2d', { alpha: false }); cx.fillStyle = '#fff'; cx.fillRect(0, 0, cv.width, cv.height); cx.drawImage(bmp, 0, 0, cv.width, cv.height); if (bmp.close) bmp.close();
+  return await new Promise((res, rej) => cv.toBlob((b) => (b ? res(b) : rej(new SrcError('A photo could not be prepared.', 'bad'))), 'image/jpeg', 0.8));
+}
+async function pageImage(srcId, n, width) {
+  const src = await Store.get(srcId); if (!src) throw new SrcError('This source is not on this device.', 'bad');
+  if (src.kind === 'photo') { const b = await Store.getImg(srcId, n); if (!b) throw new SrcError('This photo is not stored any more.', 'nofile'); return blobUrl(b); }
+  return renderPdfPage(await pdfDoc(srcId), (src.units[n - 1] || {}).pg || n, width || 1000, 0.8);
+}
+async function unitImage(src, n) { return src.kind === 'photo' ? blobUrl(await Store.getImg(src.id, n)) : renderPdfPage(await pdfDoc(src.id), (src.units[n - 1] || {}).pg || n, 1400, 0.76); }
+const needsRead = (src, u) => !!u && !u.v && (u.m || (u.e && (src.scanned || src.kind === 'photo')));
+
+/* which connected cloud models can see pictures: Gemini first (free and strong at maths), then the others */
+const vision = {
+  candidates() {
+    const a = window.KVApp; if (!a || !a.cloudCfg || !a.S || !a.S.tutor) return []; const out = [], P = a.PROV || {};
+    const pick = (p) => {
+      const c = a.cloudCfg(p), ms = c.models || [], has = (re, ex) => ms.find((m) => re.test(m) && !(ex && ex.test(m)));
+      if (p === 'gemini') return has(/gemini-2\.5-flash$/) || has(/gemini-3[\w.-]*flash/, /lite|image|tts|live/) || has(/flash/, /lite|image|tts|live|thinking/) || (/gemini/i.test(c.model || '') ? c.model : 'gemini-2.5-flash');
+      if (p === 'openrouter') return has(/(vl|vision|gemma-3|llama-4|pixtral|gemini|mistral-small-3)/i);
+      if (p === 'groq') return has(/llama-4|scout|maverick/i);
+      if (p === 'grok') return has(/vision|grok-4/i) || (/vision|grok-4/i.test(c.model || '') ? c.model : '');
+      return c.model || '';
+    };
+    ['gemini', 'openrouter', 'groq', 'grok', 'custom'].forEach((p) => { const c = a.cloudCfg(p); if (!(c.key || (p === 'custom' && c.base))) return; const m = pick(p); if (m) out.push({ k: 'cloud', p, m, name: (P[p] && P[p].name) || p }); });
+    return out;
+  },
+  info() { const c = this.candidates(); return c.length ? { ok: true, name: c[0].name, model: c[0].m, count: c.length } : { ok: false }; }
+};
+const VISION_SYS = 'You copy pages of textbooks and notes into plain text for a study app. Rules:\n- Copy the text exactly, in reading order. Keep headings, numbering and labels such as Example 3, Exercise 4.2, Q.5, (a) (b).\n- Write all maths as plain Unicode text that reads naturally: x², x₁, √x, ∫₀¹ x dx, Σ, π, θ, ≤, ≥, ≠, ∈, ∞, fractions like (a + b)/(c − d). Put each matrix or determinant row on its own line in brackets, like [ 1  2 ] then [ 3  4 ]. Put each table row on one line with " | " between cells.\n- For a figure, graph or diagram write one line: [Figure: what it shows, with every label and value you can read].\n- Leave out running headers, footers and page numbers. Do not solve, explain, translate or add anything. If something cannot be read write [unclear]. If the page is empty write [blank page].\n- Start every page with a line exactly like <<<PAGE 12>>> using the page number you are given, then its text.';
+const sleepAbort = (ms, sig) => new Promise((res, rej) => { const t = setTimeout(res, ms); if (sig) sig.addEventListener('abort', () => { clearTimeout(t); rej(new Cancelled()); }, { once: true }); });
+function parsePages(out, nums) {
+  const map = {}, txt = String(out || '').replace(/```[a-z]*\n?/gi, ''), parts = txt.split(/<<<\s*PAGE\s*(\d+)\s*>>>/i);
+  for (let i = 1; i < parts.length; i += 2) { const n = +parts[i], t = clean(parts[i + 1] || ''); if (nums.includes(n) && t && map[n] === undefined) map[n] = t; }
+  if (nums.length === 1 && map[nums[0]] === undefined && clean(txt) && parts.length === 1) map[nums[0]] = clean(txt);
+  return map;
+}
+async function askVision(cand, nums, imgs, ctx) {
+  const a = window.KVApp, content = [{ type: 'text', text: 'Copy ' + (nums.length === 1 ? 'this page' : 'these ' + nums.length + ' pages, in order') + '. Page numbers: ' + nums.join(', ') + '.' }];
+  imgs.forEach((u, i) => { content.push({ type: 'text', text: 'Page ' + nums[i] + ':' }); content.push({ type: 'image_url', image_url: { url: u } }); });
+  const msgs = [{ role: 'system', content: VISION_SYS }, { role: 'user', content }], waits = [7000, 22000, 50000];
+  for (let t = 0; ; t++) {
+    try { return parsePages(await a.llm(msgs, { model: cand, max: 2400 * nums.length + 1200, temp: 0.1, signal: ctx.signal, fast: true }), nums); }
+    catch (e) {
+      if (e && (e.name === 'AbortError' || e.name === 'Cancelled')) throw e;
+      const m = String((e && e.message) || ''), limit = /HTTP (429|503|500|502|504)/.test(m) || /rate|quota|overload|busy|exhaust/i.test(m);
+      if (limit && t < waits.length) { if (ctx.onProgress) ctx.onProgress({ frac: ctx.frac || 0, msg: 'The model asked for a short pause (' + cand.name + '). Waiting ' + Math.round(waits[t] / 1000) + ' seconds', eta: 0 }); await sleepAbort(waits[t], ctx.signal); continue; }
+      const err = new SrcError(limit ? 'The free limit of ' + cand.name + ' was reached.' : /HTTP 4\d\d/.test(m) ? cand.name + ' could not read the page images (' + m.slice(0, 160) + ').' : 'The cloud model could not be reached.', limit ? 'quota' : 'vis'); err.net = !limit && !/HTTP/.test(m); throw err;
+    }
+  }
+}
+async function readPages(srcId, nums, ctx) {
+  ctx = ctx || {}; const src = await Store.get(srcId); if (!src) throw new SrcError('This source is not on this device.', 'bad');
+  const cands = vision.candidates(); if (!cands.length) throw new SrcError('Reading pages as images needs a cloud model that can see images. Gemini has a free plan that works well: connect it in Me.', 'novision');
+  if (!src.hasFile) throw new SrcError('The original file is not stored on this device, so its pages cannot be read as images. Open the source and press Add the PDF again.', 'nofile');
+  const todo = Array.from(new Set(nums)).filter((n) => src.units[n - 1] && !src.units[n - 1].v).sort((a, b) => a - b); if (!todo.length) return { read: 0, failed: 0 };
+  const B = 3, t0 = Date.now(); let done = 0, ci = 0, failed = 0, lastSave = 0, lastErr = null; const rep = (msg) => { if (!ctx.onProgress) return; const el = (Date.now() - t0) / 1000, rate = done / Math.max(1, el); ctx.onProgress({ frac: done / todo.length, msg, eta: done ? Math.round((todo.length - done) / rate) : 0, done, total: todo.length }); };
+  const save = async () => { src.stats.chars = src.units.reduce((s, u) => s + u.t.length, 0); src.stats.math = src.units.filter((u) => u.m).length; src.stats.read = src.units.filter((u) => u.v).length; IDX.delete(srcId); await Store.put(src); };
+  try {
+    for (let i = 0; i < todo.length; i += B) {
+      if (ctx.signal && ctx.signal.aborted) throw new Cancelled();
+      const grp = todo.slice(i, i + B); rep('Reading ' + (grp.length === 1 ? src.units[grp[0] - 1].cite : src.units[grp[0] - 1].cite + ' to ' + src.units[grp[grp.length - 1] - 1].cite) + ' (' + Math.min(todo.length, i + 1) + ' of ' + todo.length + ')');
+      const imgs = []; for (const n of grp) imgs.push(await unitImage(src, n));
+      let got = null; ctx.frac = done / todo.length;
+      while (ci < cands.length && !got) { try { got = await askVision(cands[ci], grp, imgs, ctx); } catch (e) { if (e && (e.name === 'AbortError' || e.name === 'Cancelled')) throw e; lastErr = e; if (e.net) throw e; ci++; } }
+      if (!got) throw lastErr || new SrcError('No connected cloud model could read the pages.', 'vis');
+      for (let g = 0; g < grp.length; g++) if (got[grp[g]] === undefined && grp.length > 1) { try { const one = await askVision(cands[Math.min(ci, cands.length - 1)], [grp[g]], [imgs[g]], ctx); if (one[grp[g]] !== undefined) got[grp[g]] = one[grp[g]]; } catch (e) { if (e && (e.name === 'AbortError' || e.name === 'Cancelled')) throw e; } }
+      grp.forEach((n) => {
+        const u = src.units[n - 1], t = got[n]; if (t === undefined) { failed++; return; }
+        if (/^\[?\(?blank( page)?\)?\]?\.?$/i.test(t)) { u.t = '(This page is blank.)'; u.e = 1; } else { u.t = t; u.e = 0; } u.v = 1; u.m = 0; done++;
+      });
+      if (done - lastSave >= 9) { lastSave = done; await save(); }
+      rep(done + ' of ' + todo.length + ' pages read');
+    }
+  } finally { closeDoc(srcId); try { if (done) { await save(); buildIndex(src); } } catch (e) { /* ignore */ } }
+  return { read: done, failed };
+}
+async function attachFile(srcId, file) {
+  const src = await Store.get(srcId); if (!src || src.kind !== 'pdf') throw new SrcError('This source is not a PDF.', 'bad');
+  const lib = await getPdf(); let doc; try { doc = await lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()), disableFontFace: true, isEvalSupported: false }).promise; } catch (e) { throw new SrcError('This file could not be opened as a PDF.', 'bad'); }
+  const n = doc.numPages; try { doc.destroy(); } catch (e) { /* ignore */ }
+  if (n !== src.units.length) throw new SrcError('This PDF has ' + n + ' pages but your source has ' + src.units.length + '. Choose the same PDF you added before.', 'bad');
+  await Store.putFile(srcId, file); src.hasFile = true; closeDoc(srcId); await Store.put(src); return src;
 }
 
 /* ---------------- Search: a compact BM25 index, built on this device, works offline ---------------- */
@@ -418,5 +560,5 @@ async function search(srcId, query, o) {
 }
 const unitText = async (srcId, from, to) => { const s = await Store.get(srcId); if (!s) return ''; return s.units.slice(from - 1, to).map((u) => '[' + u.cite + ']\n' + u.t).join('\n\n'); };
 
-window.KVSources = { KINDS, ACCEPT, LIMIT_MB, Store, ingest, search, unitText, youtube: { id: ytId, mmss }, errors: { Cancelled, SrcError }, detect, tools: { unzip, clean, tok, mathScore, buildIndex }, native };
+window.KVSources = { KINDS, ACCEPT, LIMIT_MB, Store, ingest, search, unitText, readPages, vision, pageImage, attachFile, needsRead, youtube: { id: ytId, mmss }, errors: { Cancelled, SrcError }, detect, tools: { unzip, clean, tok, mathScore, buildIndex }, native };
 })();

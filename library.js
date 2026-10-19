@@ -9,23 +9,34 @@ const LKEY = 'kv.packs';
 /* ---- Store: the desktop launcher keeps each course as a file; the browser keeps them in local storage ---- */
 function lsRead() { try { return JSON.parse(localStorage.getItem(LKEY) || '[]'); } catch (e) { return []; } }
 function lsWrite(l) { try { localStorage.setItem(LKEY, JSON.stringify(l)); return true; } catch (e) { return false; } }
+/* a second home for courses that do not fit in local storage (big prepared books) */
+let pdb = null;
+function packDb() {
+  if (pdb) return pdb;
+  pdb = new Promise((res, rej) => { let r; try { r = indexedDB.open('knowvia-packs', 1); } catch (e) { rej(e); return; } r.onupgradeneeded = () => { r.result.createObjectStore('p'); }; r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+  return pdb;
+}
+async function pdbDo(mode, fn) { const d = await packDb(); return new Promise((res, rej) => { const tx = d.transaction('p', mode), q = fn(tx.objectStore('p')); let out; if (q) q.onsuccess = () => { out = q.result; }; tx.oncomplete = () => res(out); tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error || new Error('abort')); }); }
 const Store = {
   async list() {
     let out = [];
     if (A().DESK) { try { const r = await fetch('/__studio/packs').then((x) => x.json()); if (r && r.ok) out = r.packs || []; } catch (e) { /* old launcher */ } }
     const seen = new Set(out.map((p) => p.id));
-    lsRead().forEach((p) => { if (!seen.has(p.id)) out.push(p); });
+    lsRead().forEach((p) => { if (!seen.has(p.id)) { out.push(p); seen.add(p.id); } });
+    try { const big = await pdbDo('readonly', (st) => st.getAll()); (big || []).forEach((p) => { if (p && p.id && !seen.has(p.id)) { out.push(p); seen.add(p.id); } }); } catch (e) { /* no second store */ }
     return out;
   },
   async save(pack) {
     if (A().DESK) { try { const r = await fetch('/__studio/packs', { method: 'POST', body: JSON.stringify(pack) }).then((x) => x.json()); if (r && r.ok) return 'file'; } catch (e) { /* fall back */ } }
     const l = lsRead().filter((p) => p.id !== pack.id); l.push(pack);
-    if (!lsWrite(l)) throw new Error('This browser has no room to store the course.');
-    return 'browser';
+    if (lsWrite(l)) { try { await pdbDo('readwrite', (st) => st.delete(pack.id)); } catch (e) { /* ignore */ } return 'browser'; }
+    lsWrite(l.filter((p) => p.id !== pack.id));
+    try { await pdbDo('readwrite', (st) => st.put(pack, pack.id)); return 'browser'; } catch (e) { throw new Error('This device has no room to store the course. Free some space and try again.'); }
   },
   async remove(id) {
     if (A().DESK) { try { await fetch('/__studio/packs/delete', { method: 'POST', body: JSON.stringify({ id }) }); } catch (e) { /* ignore */ } }
     lsWrite(lsRead().filter((p) => p.id !== id));
+    try { await pdbDo('readwrite', (st) => st.delete(id)); } catch (e) { /* ignore */ }
   }
 };
 window.KVStore = Store;

@@ -826,7 +826,7 @@ body.kb-typing #bpill:not(.moved){display:none}
 .dropz.over,.dropz:hover{border-color:var(--accent)}.dropz .ico{color:var(--accent-text)}.dropz b{font-size:17px}.dropz .s{font-size:13.5px;color:var(--muted)}
 .field textarea{min-height:150px;border-radius:var(--r-sm);padding:12px 14px;font:inherit;font-size:15px;color:var(--ink);background:var(--inset-bg);border:1px solid var(--inset-bd);box-shadow:var(--inset-sh);resize:vertical}
 .srcnote{display:flex;gap:10px;align-items:flex-start;margin:0}.srcnote svg{flex:none;margin-top:2px;color:var(--accent-text)}
-.srctext{font-size:16.5px;line-height:1.75;white-space:normal;overflow-wrap:anywhere}
+.srctext{font-size:16.5px;line-height:1.75;white-space:pre-wrap;overflow-wrap:anywhere}
 .warnbox{padding:12px 14px;border-radius:var(--r-sm);background:var(--bad-bg,#fdeceb);color:var(--bad-fg,#8a2b22);font-size:14px;line-height:1.55;margin:0 0 14px}
 .prep{padding:20px;border-radius:var(--r-md);display:flex;flex-direction:column;gap:12px;margin:18px 0}.prep h3{margin:0;font-family:var(--fh);font-size:21px;color:var(--hc)}.prep p.help{margin:0}
 .prep-err{color:var(--bad-fg,#a23b30)}
@@ -834,3 +834,11 @@ body.kb-typing #bpill:not(.moved){display:none}
 .cite{display:inline-flex;align-items:center;padding:1px 9px;margin:0 2px;border-radius:99px;border:1px solid var(--accent);background:var(--inset-bg);color:var(--accent-text);font:inherit;font-size:.82em;font-weight:700;cursor:pointer;vertical-align:baseline}
 .cite:hover{background:var(--accent);color:var(--accent-fg)}
 @media(max-width:480px){.srcs .tiles{grid-template-columns:1fr 1fr}.srcs .tile{min-height:120px;padding:14px}}
+
+/* Stage two: page images */
+.vis{padding:18px 18px 14px;border-radius:22px;margin:14px 0}
+.vis h3{margin:0 0 6px;font-size:1.05rem}
+.vis .help{margin:0 0 8px}
+.pgimg{display:block;width:100%;height:auto;border-radius:14px;margin-top:12px;box-shadow:0 6px 24px rgba(0,0,0,.14)}
+.srcs .tile.soon{opacity:.55;cursor:default;pointer-events:none}
+.warnbox .row-actions{margin-top:10px}
