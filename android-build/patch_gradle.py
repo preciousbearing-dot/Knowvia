@@ -63,6 +63,12 @@ signing = '''signingConfigs {
 s = sub1(r'buildTypes\s*\{', signing, s, 'buildTypes')
 open(g, 'w').write(s)
 
+# ---- libraries for the on-device voice: unpacking .tar.bz2 voice packages
+s = open(g).read()
+if 'commons-compress' not in s:
+    s = sub1(r'dependencies\s*\{', "dependencies {\n    implementation 'org.apache.commons:commons-compress:1.27.1'", s, 'dependencies')
+    open(g, 'w').write(s)
+
 # ---- variables.gradle: keep target SDK 34
 v = root + '/variables.gradle'
 t = open(v).read()

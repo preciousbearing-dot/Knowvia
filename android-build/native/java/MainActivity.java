@@ -7,6 +7,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(KnowviaDevicePlugin.class);
+        registerPlugin(KnowviaVoicePlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

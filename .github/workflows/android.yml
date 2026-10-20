@@ -16,6 +16,8 @@ concurrency:
 env:
   # llama.cpp is pinned to the exact version the on-device engine was tested with.
   LLAMA_CPP_SHA: 10b8b7553494f3638da7668cf17cac089229122a
+  # The voice engine is pinned too: the Java classes in android-build/native/sherpa match this exact release.
+  SHERPA_VERSION: v1.13.8
 
 jobs:
   apk:
@@ -53,6 +55,13 @@ jobs:
           git log -1 --format='llama.cpp %H'
           echo "KV_LLAMA_DIR=$GITHUB_WORKSPACE/build/llama.cpp" >> "$GITHUB_ENV"
 
+      - name: Get the on-device voice engine (sherpa-onnx, pinned release)
+        run: |
+          mkdir -p build/sherpa && cd build/sherpa
+          curl -fsSL --retry 4 -o sherpa.tar.bz2 "https://github.com/k2-fsa/sherpa-onnx/releases/download/${SHERPA_VERSION}/sherpa-onnx-${SHERPA_VERSION}-android.tar.bz2"
+          tar xjf sherpa.tar.bz2
+          ls -la jniLibs/arm64-v8a
+
       - name: Android SDK pieces
         run: |
           SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
@@ -78,6 +87,10 @@ jobs:
           mkdir -p android/app/src/main/cpp android/app/src/main/java/app/knowvia/study
           cp ../android-build/native/cpp/* android/app/src/main/cpp/
           cp ../android-build/native/java/*.java android/app/src/main/java/app/knowvia/study/
+          # voice engine: Java face (same package name the prebuilt library expects) and its native libraries
+          mkdir -p android/app/src/main/java/com/k2fsa/sherpa/onnx android/app/src/main/jniLibs/arm64-v8a
+          cp ../android-build/native/sherpa/*.java android/app/src/main/java/com/k2fsa/sherpa/onnx/
+          cp sherpa/jniLibs/arm64-v8a/*.so android/app/src/main/jniLibs/arm64-v8a/
           # icons and signing key
           cp -r ../android-build/res/. android/app/src/main/res/
           cp ../android-build/knowvia-test.jks android/app/knowvia-test.jks
@@ -99,6 +112,8 @@ jobs:
           unzip -l "$APK" | grep -E "lib/arm64-v8a/(libkvllama|libllama|libggml)" | awk '{print $1, $4}'
           unzip -l "$APK" | grep -q "lib/arm64-v8a/libkvllama.so" || { echo "libkvllama.so is missing"; exit 1; }
           unzip -l "$APK" | grep -q "libggml-cpu-" || { echo "CPU backends are missing"; exit 1; }
+          unzip -l "$APK" | grep -q "lib/arm64-v8a/libsherpa-onnx-jni.so" || { echo "voice engine is missing"; exit 1; }
+          unzip -l "$APK" | grep -q "lib/arm64-v8a/libonnxruntime.so" || { echo "onnxruntime is missing"; exit 1; }
           cp "$APK" Knowvia.apk
           ls -la Knowvia.apk
 
