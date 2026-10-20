@@ -331,7 +331,7 @@ function lessonHtml(l, idx, total) {
     (next ? `<button class="btn primary" data-act="finish" data-id="${l.id}" data-next="${next.id}">Next: ${esc(next.title)}</button>`
           : `<button class="btn primary" data-act="finish" data-id="${l.id}">Finish the pack</button>`) + '</div>';
   return `<div class="sheet pn-strong"><div class="hair" aria-hidden="true"></div><article class="prose">
-    <header class="head"><div class="orn" aria-hidden="true"></div><p class="eyebrow">Lesson ${idx + 1} of ${total}. About ${l.minutes} minutes.</p><h1>${esc(l.title)}</h1><p class="lede">${esc(l.subtitle)}</p></header>
+    <header class="head"><div class="orn" aria-hidden="true"></div><p class="eyebrow">Lesson ${idx + 1} of ${total}. About ${l.minutes} minutes.</p><h1>${esc(l.title)}</h1><p class="lede">${esc(l.subtitle)}</p>${REG.hooks.lessonHead ? REG.hooks.lessonHead(l) : ''}</header>
     ${outs}${blocks}${REG.hooks.lessonExtra ? REG.hooks.lessonExtra(l) : ''}${prac}${nav}</article></div>`;
 }
 
@@ -877,7 +877,7 @@ function canGoOffline() { return !!(localModelList().length && S.tutor.brain ===
 function msgHtml(m, i) {
   if (m.role === 'user') return `<div class="bubble user">${m.quote ? `<blockquote class="uq">${esc(m.quote.length > 220 ? m.quote.slice(0, 220) + '…' : m.quote)}</blockquote>` : ''}<span>${esc(m.text)}</span></div>`;
   if (m.err) return `<div class="bubble bot raised err" role="alert">${renderMd(m.text)}<div class="erract"><button class="btn sm primary" data-act="retryask">${ic(I.refresh, 16, 2)}Try again</button>${canGoOffline() ? '<button class="btn sm" data-act="useoffline">Use the offline tutor</button>' : ''}<button class="btn sm" data-act="nav" data-r="me">Tutor settings</button><button class="btn sm" data-act="errdismiss">Dismiss</button></div></div>`;
-  const listen = m.text && 'speechSynthesis' in window ? `<button class="listen" data-act="listen" data-i="${i}" aria-label="Listen to this answer" title="Listen">${ic(I.speaker, 16, 1.9)}</button>` : '';
+  const listen = m.text && canSpeakNow() ? `<button class="listen" data-act="listen" data-i="${i}" aria-label="Listen to this answer" title="Listen">${ic(I.speaker, 16, 1.9)}</button>` : '';
   return `<div class="bubble bot raised">${m.text ? botMd(m.text) : '<span class="typing"><i></i><i></i><i></i></span>'}${listen}</div>`;
 }
 /* Amani ends each answer with a hidden line of suggested next taps. We hide it while streaming and read it afterwards. */
@@ -1084,11 +1084,18 @@ function errText(e) {
 }
 /* Listen: the device reads an answer aloud with its own voice. Character voices for Amani come later. */
 let speaking = -1;
-function stopSpeak() { try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch (e) {} speaking = -1; $$('.listen.on').forEach((b) => b.classList.remove('on')); }
+const canSpeakNow = () => (REG.hooks.canSpeak ? REG.hooks.canSpeak() : 'speechSynthesis' in window);
+function stopSpeak() { try { if (REG.hooks.stopSpeech) REG.hooks.stopSpeech('chat'); else window.speechSynthesis && window.speechSynthesis.cancel(); } catch (e) {} speaking = -1; $$('.listen.on').forEach((b) => b.classList.remove('on')); }
 function speak(i) {
-  const m = chat()[i]; if (!m || !m.text || !window.speechSynthesis) return;
+  const m = chat()[i]; if (!m || !m.text) return;
   if (speaking === i) { stopSpeak(); return; }
   stopSpeak();
+  if (REG.hooks.speakText) {
+    speaking = i; const bt = document.querySelector('.listen[data-i="' + i + '"]'); if (bt) bt.classList.add('on', 'busy');
+    if (!REG.hooks.speakText(m.text, { key: 'chat' + i, title: 'Amani', done: () => { if (speaking === i) stopSpeak(); } })) { stopSpeak(); toast('No voice is ready. Open Me, then Voice.'); }
+    return;
+  }
+  if (!window.speechSynthesis) return;
   const u = new SpeechSynthesisUtterance(m.text.replace(/[*_`#>|]/g, ' ').replace(/\s+/g, ' '));
   const v = REG.hooks.voice ? REG.hooks.voice() : {}; u.rate = v.rate || 1; u.pitch = v.pitch || 1; u.lang = 'en';
   u.onend = u.onerror = () => { if (speaking === i) stopSpeak(); };
@@ -1575,7 +1582,7 @@ function selShow() {
   let p = $('#selpop');
   const lesson = !!$('#scroll .prose');
   const btn = (a, ico, label, extra) => `<button type="button" class="sp-b ${extra || ''}" data-sel="${a}" aria-label="${label}" title="${label}">${ic(ico, 18, 1.9)}<span>${label}</span></button>`;
-  const html = btn('ask', I.chat, 'Ask Amani', 'main') + btn('simple', I.bulb, 'Explain simply') + btn('copy', I.copy, 'Copy') + ('speechSynthesis' in window ? btn('listen', I.speaker, 'Listen') : '');
+  const html = btn('ask', I.chat, 'Ask Amani', 'main') + btn('simple', I.bulb, 'Explain simply') + btn('copy', I.copy, 'Copy') + (canSpeakNow() ? btn('listen', I.speaker, 'Listen') : '');
   if (!p) { p = document.createElement('div'); p.id = 'selpop'; p.className = 'selpop'; p.setAttribute('role', 'toolbar'); p.setAttribute('aria-label', 'Actions for the selected text'); document.body.appendChild(p); }
   p.innerHTML = html;
   const w = p.offsetWidth, h = p.offsetHeight, vw = window.innerWidth, touch = matchMedia('(pointer:coarse)').matches;
@@ -1602,7 +1609,7 @@ document.addEventListener('click', (ev) => {
     try { navigator.clipboard.writeText(txt).then(ok, () => { fallbackCopy(txt); ok(); }); } catch (e) { fallbackCopy(txt); ok(); }
   }
   else if (a === 'listen') {
-    try { stopSpeak(); const u = new SpeechSynthesisUtterance(txt); const v = speechSynthesis.getVoices().find((x) => /^en/i.test(x.lang)); if (v) u.voice = v; u.rate = 0.95; speechSynthesis.speak(u); } catch (e) {}
+    try { stopSpeak(); if (REG.hooks.speakText) { if (!REG.hooks.speakText(txt, { key: 'sel', title: 'Selected text' })) toast('No voice is ready. Open Me, then Voice.'); } else { const u = new SpeechSynthesisUtterance(txt); const v = speechSynthesis.getVoices().find((x) => /^en/i.test(x.lang)); if (v) u.voice = v; u.rate = 0.95; speechSynthesis.speak(u); } } catch (e) {}
     done();
   }
 });
