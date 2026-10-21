@@ -911,3 +911,9 @@ body.kb-typing #bpill:not(.moved){display:none}
 .lhear{align-content:flex-start;align-items:center}
 .lhear .btn{flex:none;height:auto;align-self:center}
 .lhear{flex:none}
+
+/* v0.12 signature and update line */
+.sign{margin-top:14px!important;padding-top:12px;border-top:1px solid var(--line,rgba(120,120,160,.2));font-size:13.5px!important;line-height:1.55;opacity:.9}
+.sign b{font-family:var(--fh);letter-spacing:.01em}
+.why{display:flex;flex-direction:column;gap:8px;padding:16px;border-radius:var(--r-md,18px)}
+.why details{border-top:1px solid rgba(120,120,160,.18);padding-top:8px}.why summary{cursor:pointer;font-weight:600}.why details p{margin:6px 0 0}

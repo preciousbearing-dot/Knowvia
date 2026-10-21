@@ -1,8 +1,8 @@
-/* Knowvia, version 0.4. Plain JavaScript, no build step, works offline. */
+/* Knowvia. Plain JavaScript, no build step, works offline. */
 (function () {
 'use strict';
 
-let APP_VERSION = '0.4.0';
+let APP_VERSION = String(window.KV_VERSION || '0.0.0');
 const REG = window.KVReg = window.KVReg || {}; ['screens','acts','ins','hooks','names'].forEach((k) => { REG[k] = REG[k] || {}; }); REG.ready = REG.ready || [];
 const PACKS = window.PACKS || [];
 const $ = (s, r) => (r || document).querySelector(s);
@@ -91,19 +91,19 @@ const PROV = {
     pref: [/^gemini-2\.5-flash$/, /^gemini-2\.5-flash-lite$/, /^gemini-3.*flash/, /^gemini-2\.5-pro$/],
     tag: 'Best all-round free pick', blurb: 'Fast, strong at explaining, good with long lessons. Free tier with daily limits.',
     keyUrl: 'https://aistudio.google.com/apikey',
-    steps: ['Open <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio, API keys</a>.', 'Sign in with any Google account and accept the terms if asked.', 'Press <b>Create API key</b>. If it asks for a project, pick or create one.', 'Copy the key, paste it below, and press <b>Connect</b>.'],
+    steps: ['Open <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio, API keys</a>. It opens in your browser.', 'Sign in with any Google account. Accept the terms if it asks.', 'Tap <b>Create API key</b>. If it asks for a project, choose <b>Create API key in new project</b>.', 'A long key appears (it starts with <b>AIza</b>). Tap the copy icon next to it.', 'Come back to Knowvia, tap <b>Paste</b> below, then <b>Connect</b>. Knowvia tests the key for you.'],
     fine: 'On Google\'s free tier, your prompts can be used to improve their products. Do not paste private information. Free limits change, so check the AI Studio page.' },
   openrouter: { name: 'OpenRouter free models', host: 'openrouter.ai', base: 'https://openrouter.ai/api/v1', model: '',
     pref: [/llama.*70b/i, /gemma/i, /qwen/i, /deepseek/i, /mistral/i],
     tag: 'Many free models, one key', blurb: 'One account unlocks many free models (their names end in :free). Good as a backup when another provider is busy.',
     keyUrl: 'https://openrouter.ai/keys',
-    steps: ['Create a free account at <a href="https://openrouter.ai/" target="_blank" rel="noopener">openrouter.ai</a>.', 'Open <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">the Keys page</a> and press <b>Create Key</b>.', 'Copy the key, paste it below, and press <b>Connect</b>.', 'Pick a model that ends in <b>:free</b> from the list that appears.'],
+    steps: ['Create a free account at <a href="https://openrouter.ai/" target="_blank" rel="noopener">openrouter.ai</a>.', 'Open <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">the Keys page</a> and tap <b>Create Key</b>. Give it any name.', 'Copy the key (it starts with <b>sk-or-</b>).', 'Come back to Knowvia, tap <b>Paste</b> below, then <b>Connect</b>.', 'Pick a model that ends in <b>:free</b> from the list that appears.'],
     fine: 'At the time of writing, free models are limited to about 50 requests a day, and about 1,000 a day after you buy $10 of credit once. Some free models change or disappear, so keep a second one handy.' },
   groq: { name: 'Groq', host: 'api.groq.com', base: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile',
     pref: [/^llama-3\.3-70b/, /^llama-3\.1-8b/, /^openai\/gpt-oss/, /^qwen/],
     tag: 'Very fast answers', blurb: 'Answers appear almost instantly. Free tier with rate limits, so long study sessions can hit a pause.',
     keyUrl: 'https://console.groq.com/keys',
-    steps: ['Sign up at <a href="https://console.groq.com/" target="_blank" rel="noopener">console.groq.com</a>.', 'Open <a href="https://console.groq.com/keys" target="_blank" rel="noopener">API Keys</a> and press <b>Create API Key</b>.', 'Copy the key, paste it below, and press <b>Connect</b>.'],
+    steps: ['Sign up at <a href="https://console.groq.com/" target="_blank" rel="noopener">console.groq.com</a>.', 'Open <a href="https://console.groq.com/keys" target="_blank" rel="noopener">API Keys</a> and tap <b>Create API Key</b>. Give it any name.', 'Copy the key (it starts with <b>gsk_</b>). Groq shows it only once.', 'Come back to Knowvia, tap <b>Paste</b> below, then <b>Connect</b>.'],
     fine: 'Free limits are per minute and per day and can change. If you see a "rate limit" message, wait a little or switch model from the menu under the text box.' },
   grok: { name: 'Grok (xAI)', host: 'api.x.ai', base: 'https://api.x.ai/v1', model: '', pref: [/grok/i], alt: true,
     tag: 'Credits or paid', blurb: 'Strong models, but xAI does not offer a standing free tier. Some new accounts get credits, so check before relying on it.',
@@ -159,7 +159,8 @@ function pickModels(id, cur) {
 function setCloudStatus(id, state, msg) { cloudStatus[id] = { state, msg }; refreshCloudSlots(); }
 async function connectCloud(id) {
   const cfg = cloudCfg(id);
-  if (!cfg.key) { setCloudStatus(id, 'bad', 'Paste your key first.'); return; }
+  if (!cfg.key) { setCloudStatus(id, 'bad', 'Paste your key first. Tap Paste, or press and hold in the box and choose Paste.'); return; }
+  if (/^https?:\/\//i.test(cfg.key) || /\s/.test(cfg.key)) { setCloudStatus(id, 'bad', /^https?:/i.test(cfg.key) ? 'That is a web link, not a key. Open the key page, create a key there, and copy the long key it shows.' : 'The key has a space or a line break in it. Copy only the key itself, then paste again.'); return; }
   if (id === 'custom' && (!cfg.base || !cfg.model)) { setCloudStatus(id, 'bad', 'A custom provider needs an address, a key and a model name.'); return; }
   setCloudStatus(id, 'busy', 'Checking your key...');
   cfg.ok = false;
@@ -179,9 +180,9 @@ async function connectCloud(id) {
       }
       let body = ''; try { body = (await r.text()).slice(0, 300); } catch (e) { /* ignore */ }
       if (r.status === 429) { cfg.model = m; cfg.ok = true; save(); S.tutor.brain = 'cloud'; S.tutor.provider = id; save(); setCloudStatus(id, 'good', 'Your key works. This model is busy right now (rate limit), so pick another model from the menu if answers fail.'); afterTutorChange(); return; }
-      if (r.status === 401 || r.status === 403 || (r.status === 400 && /api key|key not valid|invalid.*key/i.test(body))) { setCloudStatus(id, 'bad', 'The provider refused this key. Copy it again from the provider page and make sure there are no spaces.'); return; }
+      if (r.status === 401 || r.status === 403 || (r.status === 400 && /api key|key not valid|invalid.*key/i.test(body))) { setCloudStatus(id, 'bad', 'The provider refused this key. Copy it again from the provider page, with nothing before or after it. If it still fails, create a fresh key and try that one.'); return; }
       last = 'HTTP ' + r.status + (body ? ': ' + body.slice(0, 120) : '');
-    } catch (e) { last = 'Could not reach ' + PROV[id].name + '. Check your internet connection.'; if (!navigator.onLine) break; }
+    } catch (e) { last = 'Could not reach ' + PROV[id].name + '. Check your internet connection and try again.'; if (!navigator.onLine) break; }
   }
   setCloudStatus(id, 'bad', last || 'Could not connect.');
 }
@@ -197,11 +198,18 @@ function cloudListHtml() {
     const models = c.models.length ? `<div class="field"><label for="m-${id}">Model</label><select id="m-${id}" data-in="cmodel" data-p="${id}">${c.models.map((m) => `<option value="${esc(m)}" ${m === c.model ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select></div>` : (isCustom ? '' : '');
     const custom = isCustom ? `<div class="field"><label for="b-${id}">Address (ends in /v1)</label><input id="b-${id}" data-in="cbase" data-p="${id}" value="${esc(c.base || '')}" placeholder="https://.../v1" autocomplete="off"></div><div class="field"><label for="n-${id}">Model name</label><input id="n-${id}" data-in="cmodeltxt" data-p="${id}" value="${esc(c.model || '')}" autocomplete="off"></div>` : '';
     return `<div class="cloud pn-strong ${open ? 'open' : ''} ${alt ? 'alt' : ''}"><button class="ch" data-act="cloudopen" data-p="${id}" aria-expanded="${open}"><span class="rank">${alt ? ic(I.cloud, 18, 2) : i + 1}</span><span><b>${esc(P.name)}${conn}</b><span class="s">${esc(P.tag)}. ${esc(P.blurb)}</span></span><span class="chev">${ic(I.chev, 18, 2)}</span></button>
-      ${open ? `<div class="body">${steps}${custom}<div class="field"><label for="k-${id}">Your API key</label><div class="keyrow"><input id="k-${id}" data-in="ckey" data-p="${id}" type="password" value="${esc(c.key)}" placeholder="Paste your key here" autocomplete="off" spellcheck="false"><button class="btn primary" data-act="cloudconnect" data-p="${id}">${c.ok ? 'Test again' : 'Connect'}</button></div></div>
+      ${open ? `<div class="body">${steps}${custom}<div class="field"><label for="k-${id}">Your API key</label><div class="keyrow"><input id="k-${id}" data-in="ckey" data-p="${id}" type="password" value="${esc(c.key)}" placeholder="Paste your key here" autocomplete="off" spellcheck="false"><button class="btn sm" data-act="ckeypaste" data-p="${id}">Paste</button><button class="btn primary" data-act="cloudconnect" data-p="${id}">${c.ok ? 'Test again' : 'Connect'}</button></div></div>
         ${st.msg ? `<p class="st-msg ${st.state}" role="status">${esc(st.msg)}</p>` : ''}${models}
         ${P.fine ? `<p class="fine">${esc(P.fine)}</p>` : ''}${P.keyUrl ? `<div class="row-actions"><a class="btn sm" href="${P.keyUrl}" target="_blank" rel="noopener">Open the ${esc(P.name.split(' ')[0])} key page</a></div>` : ''}</div>` : ''}</div>`;
   };
-  return `<p class="help" style="margin:0">Top free cloud models, ranked. Start with number 1. Cloud tutors are much faster than a small offline model on an older laptop. Your key stays on this device.</p>
+  const why = `<div class="why pn-strong inset"><b>Why Amani needs a free key</b>
+    <p class="help">Amani thinks on a powerful AI service on the internet. A key is like a password that lets Knowvia talk to that service for you. You make it once, for free, in about two minutes, and Knowvia does the rest. Knowvia has no server of its own, so this is how Amani stays free for you.</p>
+    <details><summary class="help">Is it safe?</summary><p class="help">Your key is saved only on this phone and is sent only to the service you pick. Do not share it with anyone. If you ever worry it leaked, delete it on the service's key page and make a new one.</p></details>
+    <details><summary class="help">Will I be charged?</summary><p class="help">At the time of writing, the free plans below do not ask for a card. They have daily limits instead, and Knowvia tells you when one is reached.</p></details>
+    <details><summary class="help">What if I reach a limit?</summary><p class="help">Free plans pause for a while, then work again (often the next day). If you connect two services, Knowvia moves to the second one by itself, so connect two when you can.</p></details>
+    <details><summary class="help">What if I have no internet?</summary><p class="help">Lessons, quizzes and flashcards always work offline. On a phone that can run it, you can also add the offline tutor from Me.</p></details>
+    <p class="help"><b>Start with number 1, Google Gemini.</b> It is the easiest, and it also powers Amani's voice and reading photos of pages.</p></div>`;
+  return why + `<p class="help" style="margin:0">Free cloud tutors, ranked. Cloud tutors are much faster than a small offline model. Tap one to see the steps.</p>
     <div class="clouds">${PROV_TOP.map((id, i) => card(id, i, false)).join('')}</div>
     <p class="sub-h">Other options</p><div class="clouds">${PROV_ALT.map((id, i) => card(id, i, true)).join('')}</div>`;
 }
@@ -636,9 +644,7 @@ function showOv(html) {
   let ov = $('#info-ov'); if (!ov) { ov = document.createElement('div'); ov.id = 'info-ov'; ov.className = 'ov'; document.body.appendChild(ov); }
   ov.innerHTML = `<div class="ov-card pn-strong kv-in" role="dialog" aria-modal="true">${html}<div class="row-actions"><button class="btn primary" data-act="ovclose">Got it</button></div></div>`;
 }
-const SOON = {
-  upload: ['Your own sources', 'Add a PDF, like a textbook, or your own notes. Amani will read it, work out a start-to-finish study path, and answer from it with page references.', 'Coming in the next version. For now, use Build a course to make a course on any topic.']
-};
+const SOON = {};
 
 function screenLearn() {
   const p = pack();
@@ -771,9 +777,12 @@ function screenMe() {
   <section class="setting pn-strong"><h3>Permissions</h3>
     <p class="help">Knowvia asks only when it needs something, and tells you why first.</p>
     <div class="field"><label>Keep my progress safe</label><p class="help" id="perm-storage">Checking...</p><div class="row-actions"><button class="btn" data-act="persist">Protect my progress</button></div></div>
-    <p class="help"><b>Files.</b> Asked when you add your own sources (coming soon). <b>Notifications.</b> Not used yet; study reminders will ask first. <b>Installing the offline tutor.</b> Always asks before downloading anything.</p></section>
+    <p class="help"><b>Files, photos and camera.</b> Asked only when you add your own sources. <b>Notifications.</b> Not used yet; study reminders will ask first. <b>Installing the offline tutor.</b> Always asks before downloading anything.</p></section>
   <section class="setting pn-strong"><h3>About and data</h3>
     <p class="help">Knowvia version ${APP_VERSION}. Everything you do is saved on this device only.</p>
+    ${window.KVUpdate && !DESK && !isNative() ? window.KVUpdate.card().line + window.KVUpdate.card().btn : ''}
+    <details class="help" style="margin-top:6px"><summary style="cursor:pointer">App info for support</summary><p class="help" style="margin:6px 0">If something is not working, tap Copy and send this to the person who gave you the app. It has no keys, courses or personal files.</p><div class="row-actions"><button class="btn sm" data-act="info-copy">Copy app info</button></div><pre id="info-box" hidden style="white-space:pre-wrap;font-size:12px"></pre></details>
+    ${isNative() ? '' : '<p class="help sign">Created by <b>Harry Precious</b> · HP Studio<br>Built with the HP Intelligence Framework</p>'}
     <div class="field"><label for="my-name">Your name</label><input id="my-name" data-in="myname" value="${esc(S.name || '')}" maxlength="24" autocomplete="off" placeholder="What should Amani call you?"></div>
     <div class="row-actions"><button class="btn" data-act="tour">Replay the welcome tour</button></div>
     ${DESK ? `<div class="field"><label>Install an update</label><p class="help">Drop the update file anywhere on this window, or choose it here. Your progress is kept.</p><input type="file" accept=".zip" data-in="updfile"></div>` : ''}
@@ -1283,7 +1292,7 @@ function deviceInfo() {
 const VALS = [
   { eye: 'Welcome', h: 'Learn anything, even with no internet.', p: 'Knowvia keeps your courses on your device. Study on a bus, in a power cut, or anywhere data is slow.', scene: 'offline' },
   { eye: 'Meet Amani', h: 'A study companion that reads along with you.', p: 'Amani sees the lesson you are on. Ask it to explain, give an example, or quiz you. It answers from your course, not from guesswork.', scene: 'amani' },
-  { eye: 'Three ways to learn', h: 'Courses, your own sources, or build one.', p: 'Start with polished built-in courses, or have Amani build a whole course on any topic. Adding your own PDFs and notes is coming next.', scene: 'ways' },
+  { eye: 'Three ways to learn', h: 'Courses, your own sources, or build one.', p: 'Start with polished built-in courses, or have Amani build a whole course on any topic. Or add your own PDFs, links, notes and photos of pages, and learn from them step by step.', scene: 'ways' },
   { eye: 'Made for you', h: 'Three looks. One calm place to study.', p: 'Frost Glass, Soft Clay, or Charcoal and Gold. Choose the one that feels right, and change it any time.', scene: 'themes' },
   { eye: 'Private by design', h: 'Your progress stays on your device.', p: 'No account is needed to start. Knowvia asks for a permission only at the moment it needs it, and always tells you why.', scene: 'private' }
 ];
@@ -1297,7 +1306,7 @@ function obScene(k) {
     <div class="row"><span style="display:block;width:56px;height:56px;flex:none;opacity:0"></span><div class="bub pn-strong" style="--d:2">Of course. Think of it like this...</div></div></div></div>`;
   if (k === 'ways') return `<div class="ob-scene" style="height:auto;padding:6px 0"><div style="display:flex;flex-direction:column;gap:12px;align-items:center;width:100%">
     <div class="way pn-strong" style="--d:0"><span class="ico">${ic(I.book, 22, 1.8)}</span><span><b>Built-in courses</b><span class="s">Ready to study, work offline</span></span></div>
-    <div class="way pn-strong" style="--d:1"><span class="ico">${ic(I.upload, 22, 1.8)}</span><span><b>Your own sources</b><span class="s">PDFs and notes, taught step by step</span></span><span class="soon">Soon</span></div>
+    <div class="way pn-strong" style="--d:1"><span class="ico">${ic(I.upload, 22, 1.8)}</span><span><b>Your own sources</b><span class="s">PDFs, links and notes, taught step by step</span></span></div>
     <div class="way pn-strong" style="--d:2"><span class="ico">${ic(I.spark, 22, 1.8)}</span><span><b>Build a course</b><span class="s">Pick a topic, Amani builds it</span></span></div></div></div>`;
   if (k === 'themes') return `<div class="ob-scene" style="gap:18px">${[['frost-light', 0], ['clay', -1.6], ['gold', -3.2]].map(([n, dl]) => `<span style="display:block;width:92px;height:92px;animation:kvFloat 5s ease-in-out infinite;animation-delay:${dl}s;filter:drop-shadow(0 14px 18px rgba(40,40,80,.25))">${KV.flow(n, 92)}</span>`).join('')}</div>`;
   return `<div class="ob-scene"><div class="orb pn-strong"><span style="color:var(--accent-text);display:flex;width:60%;height:60%">${ic(I.lock, 80, 1.5)}</span></div>
@@ -1444,6 +1453,7 @@ document.addEventListener('click', (ev) => {
     }
     case 'tour': obOpen(1, true); break;
     case 'cloudopen': cloudOpen = cloudOpen === d.p ? '' : d.p; refreshCloudSlots(); break;
+    case 'ckeypaste': { try { navigator.clipboard.readText().then((t) => { const k = document.getElementById('k-' + d.p); t = String(t || '').trim(); if (!t) { toast('Nothing copied yet. Copy the key first.'); return; } cloudCfg(d.p).key = t; if (k) k.value = t; save(); toast('Pasted. Now tap Connect.'); }).catch(() => toast('Press and hold in the key box, then choose Paste.')); } catch (e) { toast('Press and hold in the key box, then choose Paste.'); } break; }
     case 'cloudconnect': { const k = document.getElementById('k-' + d.p); if (k) cloudCfg(d.p).key = k.value.trim(); save(); connectCloud(d.p); break; }
     case 'mdl': mdlOpen = !mdlOpen; renderTutor(); if (mdlOpen) loadMenuModels(); break;
     case 'tocloud': { const bc = bestCloud(); if (!bc) { go('me'); break; } S.tutor.brain = 'cloud'; S.tutor.provider = bc.p; save(); afterTutorChange(); toast('Amani is back on a cloud model'); break; }

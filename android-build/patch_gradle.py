@@ -82,5 +82,12 @@ if 'extractNativeLibs' not in x:
     x = sub1(r'<application', '<application android:extractNativeLibs="true"', x, 'application tag')
 if 'ACCESS_NETWORK_STATE' not in x:
     x = sub1(r'<uses-permission', '<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />\n    <uses-permission', x, 'uses-permission')
+if 'REQUEST_INSTALL_PACKAGES' not in x:
+    x = sub1(r'<uses-permission', '<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />\n    <uses-permission', x, 'uses-permission')
+if 'KvUpdateProvider' not in x:
+    x = sub1(r'</application>', '''<provider android:name=".KvUpdateProvider" android:authorities="${applicationId}.kvupdate" android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/kv_update_paths" />
+        </provider>
+    </application>''', x, 'application close')
 open(m, 'w').write(x)
 print('patched android project in', root)

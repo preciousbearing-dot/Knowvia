@@ -41,11 +41,11 @@ function offlineLine() {
 const prevMe = REG.hooks.meCard;
 REG.hooks.meCard = () => {
   const prev = prevMe ? prevMe() : '';
-  if (native) return prev + `<section class="setting pn-strong"><h3>Knowvia Android app</h3><p class="help">You are using the Knowvia app on this phone. Your courses, progress and keys stay on this device. Lessons, quizzes and flashcards work with no internet.</p><p class="help">To update, download the newest app file from <b>github.com/preciousbearing-dot/Knowvia/releases</b> and install it over this one. Your progress is kept.</p></section>`;
+  if (native) { const c = window.KVUpdate ? window.KVUpdate.card() : null; return prev + `<section class="setting pn-strong"><h3>Knowvia Android app</h3><p class="help">You are using Knowvia ${A().esc(A().version)} on this phone. Your courses, progress and keys stay on this device. Lessons, quizzes and flashcards work with no internet.</p>${c ? c.line + c.btn + c.sign : ''}</section>`; }
   if (!web) return prev;
   const off = offlineLine();
   return prev + `<section class="setting pn-strong"><h3>Install on this device</h3>${body()}${off ? `<p class="help">${A().esc(off)}</p>` : ''}
-    <p class="help">Note: the offline tutor (Ollama) and live web research need the Windows app. In the installed phone app, Amani uses a cloud model when you have internet.</p></section>`;
+    <p class="help">Note: the offline tutor and the offline voice live in the Knowvia Android app. In the browser version, Amani uses a cloud model when you have internet.</p></section>`;
 };
 REG.acts['pwa-install'] = () => {
   if (!deferred) return;

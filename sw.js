@@ -1,7 +1,7 @@
 /* Knowvia service worker: keeps the app working with no internet.
    Pages and code: fresh from the network when online, the saved copy when not. Fonts and icons: saved copy first. */
 const V = 'knowvia-shell-v1';
-const SHELL = ['./', 'index.html', 'styles.css', 'brand.js', 'data/packs.js', 'playbook.js', 'catalog.js', 'persona.js', 'net.js', 'research.js', 'pwa.js', 'device.js', 'offline.js', 'rules.js', 'voice.js', 'voice-ui.js', 'sources.js', 'sources-ui.js', 'vendor/pdf.min.js', 'vendor/pdf.worker.min.js', 'library.js', 'director.js', 'build.js', 'app.js', 'version.json', 'manifest.webmanifest', 'icon.png',
+const SHELL = ['./', 'index.html', 'styles.css', 'version.js', 'brand.js', 'data/packs.js', 'playbook.js', 'catalog.js', 'persona.js', 'net.js', 'research.js', 'pwa.js', 'device.js', 'offline.js', 'rules.js', 'voice.js', 'voice-ui.js', 'update.js', 'sources.js', 'sources-ui.js', 'vendor/pdf.min.js', 'vendor/pdf.worker.min.js', 'library.js', 'director.js', 'build.js', 'app.js', 'version.json', 'manifest.webmanifest', 'icon.png',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png', 'icons/apple-touch-icon.png'];
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(V).then((c) => Promise.all(SHELL.map((u) => c.add(new Request(u, { cache: 'reload' })).catch(() => {})))).then(() => self.skipWaiting()));

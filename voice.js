@@ -182,7 +182,7 @@ async function gemSpeak(text, voice, style, signal) {
       let r;
       try {
         r = await fetch(GBASE + '/models/' + m + ':generateContent', { method: 'POST', signal, headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-          body: JSON.stringify({ contents: [{ parts: [{ text: (style ? 'Say this ' + style + ': ' : '') + text }] }], generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } } } }) });
+          body: JSON.stringify({ contents: [{ parts: [{ text: text }] }], generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } } } }) });
       } catch (e) { if (signal && signal.aborted) throw e; throw mk('net', 'The connection dropped.'); }
       if (r.ok) {
         const j = await r.json().catch(() => ({})), part = (((j.candidates || [])[0] || {}).content || {}).parts; const p = (part || []).find((x) => x.inlineData && x.inlineData.data);
@@ -269,10 +269,20 @@ function order(prefer) {
 }
 const usable = (prefer) => order(prefer).filter((x) => AVAIL[x]());
 const canSpeak = () => usable().length > 0;
-function voiceTag(engine) { return engine === 'cloud' ? 'g:' + gemVoice() + ':' + styleOf() : engine === 'offline' ? 'o:' + offSid() : 'p'; }
+function voiceTag(engine) { return engine === 'cloud' ? 'g2:' + gemVoice() : engine === 'offline' ? 'o:' + offSid() : 'p'; }
 
 /* One piece of speech as audio at 16 kHz (or null for the phone's own voice, which speaks directly). Saved pieces are reused. */
 const PF = Object.create(null);
+/* Clean-up for cloud clips: cut silence and stray noise at both ends, and spot clips that are far too long for their words. */
+function tooLong(secs, text) { const w = (String(text).match(/\S+/g) || []).length; return secs > w * 0.7 + 4; }
+function trimPcm(p) {
+  const th = 700, win = 160, n = p.length; if (n < win * 4) return p;
+  const loud = (i) => { let m = 0; for (let k = i; k < i + win && k < n; k++) { const v = p[k] < 0 ? -p[k] : p[k]; if (v > m) m = v; } return m > th; };
+  let a = 0; while (a < n - win && !loud(a)) a += win;
+  let b = n; while (b > a + win && !loud(b - win)) b -= win;
+  const pad = Math.round(RATE * 0.08); a = Math.max(0, a - pad); b = Math.min(n, b + pad);
+  return b - a > RATE * 0.2 ? p.subarray(a, b).slice() : p;
+}
 async function makeClip(engine, text, signal) {
   if (engine === 'phone') return null;
   const key = hash(engine + '|' + voiceTag(engine) + '|' + text), mem = PF[key]; if (mem) return mem;
@@ -280,9 +290,13 @@ async function makeClip(engine, text, signal) {
     const saved = await clipGet(key);
     if (saved && saved.buf) { return { pcm: new Int16Array(saved.buf), cached: true, key }; }
     let r;
-    if (engine === 'cloud') r = await gemSpeak(text, gemVoice(), styleOf(), signal);
-    else r = await offSpeak(text, offSid(), 1);
-    const pcm = resample(r.pcm, r.rate, RATE);
+    if (engine === 'cloud') {
+      /* The voice is chosen by name only. A clip far longer than the words need means the model read something extra or made a glitch: ask once more. */
+      r = await gemSpeak(text, gemVoice(), '', signal);
+      if (tooLong(r.pcm.length / r.rate, text)) { try { const r2 = await gemSpeak(text, gemVoice(), '', signal); if (r2.pcm.length < r.pcm.length) r = r2; } catch (e) { if (signal && signal.aborted) throw e; } }
+    } else r = await offSpeak(text, offSid(), 1);
+    let pcm = resample(r.pcm, r.rate, RATE);
+    if (engine === 'cloud') pcm = trimPcm(pcm);
     await clipPut(key, pcm);
     return { pcm, cached: false, key, genMs: r.genMs };
   })();
