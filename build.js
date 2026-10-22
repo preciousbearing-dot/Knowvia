@@ -166,6 +166,7 @@ function setupView() {
   const segs = (act, val, opts) => `<div class="seg inset" role="group">${opts.map(([v, nm]) => `<button data-act="${act}" data-v="${v}" aria-pressed="${String(val) === String(v)}">${nm}</button>`).join('')}</div>`;
   return `<div class="page build"><button class="btn sm back-l" data-act="b-back">${a.ic(a.I.back, 18, 2)}All topics</button>
     <div class="b-hero kv-in"><p class="eyebrow">Set up your course</p><h1>${esc(BS.topic)}</h1></div>
+    ${window.KVRequest ? window.KVRequest.cta(BS.topic) : ''}
     <section class="pn-strong psec kv-in" style="--d:1"><div class="field"><label for="b-topic">Topic</label><input id="b-topic" data-in="b-topic" value="${esc(BS.topic)}" maxlength="90" autocomplete="off"></div>
       <div class="field"><label>Your level</label>${segs('b-level', BS.level, [['Beginner', 'Beginner'], ['Intermediate', 'Intermediate'], ['Advanced', 'Advanced']])}</div>
       <div class="field"><label>How deep?</label>${segs('b-depth', BS.depth, [['short', 'Short'], ['standard', 'Standard'], ['deep', 'Deep']])}<p class="help">${esc(DEPTH[BS.depth].hint)}${BS.depth === 'standard' ? ' <b>Recommended.</b>' : ''} Amani decides the exact number of modules and lessons from the subject.</p></div>

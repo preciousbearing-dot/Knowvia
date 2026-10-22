@@ -87,20 +87,20 @@ const I = {
 
 /* ---------------- Cloud providers ---------------- */
 const PROV = {
-  gemini: { name: 'Google Gemini', host: 'generativelanguage.googleapis.com', base: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-2.5-flash',
+  gemini: { name: 'Google Gemini', why: 'Also gives Amani a natural voice and reads photos of pages.', host: 'generativelanguage.googleapis.com', base: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-2.5-flash',
     pref: [/^gemini-2\.5-flash$/, /^gemini-2\.5-flash-lite$/, /^gemini-3.*flash/, /^gemini-2\.5-pro$/],
     tag: 'Best all-round free pick', blurb: 'Fast, strong at explaining, good with long lessons. Free tier with daily limits.',
     keyUrl: 'https://aistudio.google.com/apikey',
     steps: ['Open <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio, API keys</a>. It opens in your browser.', 'Sign in with any Google account. Accept the terms if it asks.', 'Tap <b>Create API key</b>. If it asks for a project, choose <b>Create API key in new project</b>.', 'A long key appears (it starts with <b>AIza</b>). Tap the copy icon next to it.', 'Come back to Knowvia, tap <b>Paste</b> below, then <b>Connect</b>. Knowvia tests the key for you.'],
     fine: 'On Google\'s free tier, your prompts can be used to improve their products. Do not paste private information. Free limits change, so check the AI Studio page.' },
-  openrouter: { name: 'OpenRouter free models', host: 'openrouter.ai', base: 'https://openrouter.ai/api/v1', model: '',
+  openrouter: { name: 'OpenRouter free models', why: 'Your backup. Many free models behind one key.', host: 'openrouter.ai', base: 'https://openrouter.ai/api/v1', model: '',
     pref: [/llama.*70b/i, /gemma/i, /qwen/i, /deepseek/i, /mistral/i],
     tag: 'Many free models, one key', blurb: 'One account unlocks many free models (their names end in :free). Good as a backup when another provider is busy.',
     keyUrl: 'https://openrouter.ai/keys',
     steps: ['Create a free account at <a href="https://openrouter.ai/" target="_blank" rel="noopener">openrouter.ai</a>.', 'Open <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">the Keys page</a> and tap <b>Create Key</b>. Give it any name.', 'Copy the key (it starts with <b>sk-or-</b>).', 'Come back to Knowvia, tap <b>Paste</b> below, then <b>Connect</b>.', 'Pick a model that ends in <b>:free</b> from the list that appears.'],
     fine: 'At the time of writing, free models are limited to about 50 requests a day, and about 1,000 a day after you buy $10 of credit once. Some free models change or disappear, so keep a second one handy.' },
-  groq: { name: 'Groq', host: 'api.groq.com', base: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile',
-    pref: [/^llama-3\.3-70b/, /^llama-3\.1-8b/, /^openai\/gpt-oss/, /^qwen/],
+  groq: { name: 'Groq', host: 'api.groq.com', base: 'https://api.groq.com/openai/v1', model: 'openai/gpt-oss-120b', why: 'Very fast chat. Its 120B model is a favourite for Amani.',
+    pref: [/^openai\/gpt-oss-120b/, /^llama-3\.3-70b/, /^openai\/gpt-oss-20b/, /^llama-3\.1-8b/, /^qwen/],
     tag: 'Very fast answers', blurb: 'Answers appear almost instantly. Free tier with rate limits, so long study sessions can hit a pause.',
     keyUrl: 'https://console.groq.com/keys',
     steps: ['Sign up at <a href="https://console.groq.com/" target="_blank" rel="noopener">console.groq.com</a>.', 'Open <a href="https://console.groq.com/keys" target="_blank" rel="noopener">API Keys</a> and tap <b>Create API Key</b>. Give it any name.', 'Copy the key (it starts with <b>gsk_</b>). Groq shows it only once.', 'Come back to Knowvia, tap <b>Paste</b> below, then <b>Connect</b>.'],
@@ -189,6 +189,14 @@ async function connectCloud(id) {
 function localModelList() { return (DESK && DESK.models && DESK.models.length) ? DESK.models : (ollamaModels || []); }
 function tutorReady() { return !!((DESK && DESK.ready && localModelList().length) || (isNative() && localModelList().length) || Object.keys(S.tutor.clouds).some((k) => S.tutor.clouds[k] && S.tutor.clouds[k].ok)); }
 function activeModelName() { const t = S.tutor; return t.brain === 'local' ? (t.model || '') : (cloudCfg(t.provider).model || ''); }
+const keysOn = () => PROV_TOP.filter((id) => { const c = cloudCfg(id); return c.ok && c.key; });
+function keysPanel() {
+  const on = keysOn(), n = on.length;
+  const rows = PROV_TOP.map((id) => `<li class="${on.includes(id) ? 'on' : ''}"><span class="kdot" aria-hidden="true">${on.includes(id) ? ic('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 14, 2.6) : ''}</span><span><b>${esc(PROV[id].name)}</b> <span class="s">${esc(PROV[id].why || '')}</span></span></li>`).join('');
+  const head = n >= 3 ? 'All three connected. Amani is ready for anything.' : n === 0 ? 'Recommended: connect all three free keys' : 'Connected ' + n + ' of 3. Connect the other ' + (3 - n === 1 ? 'one' : 'two') + ' for the full experience.';
+  const why = n >= 3 ? 'If one runs out of its free limit or gets busy, Amani moves to the next by herself, and courses build much faster.' : 'Free keys have limits. With all three, Amani switches by herself when one is busy or used up, chat stays fast, and Build a course runs several models at once. It takes about two minutes each, and you only do it once.';
+  return `<div class="keys3 pn-strong inset ${n >= 3 ? 'done' : ''}" role="group" aria-label="Recommended: connect all three keys"><b>${head}</b><ul>${rows}</ul><p class="help">${why}</p></div>`;
+}
 function cloudListHtml() {
   const card = (id, i, alt) => {
     const P = PROV[id], c = cloudCfg(id), st = cloudStatus[id] || {}, open = cloudOpen === id;
@@ -209,7 +217,7 @@ function cloudListHtml() {
     <details><summary class="help">What if I reach a limit?</summary><p class="help">Free plans pause for a while, then work again (often the next day). If you connect two services, Knowvia moves to the second one by itself, so connect two when you can.</p></details>
     <details><summary class="help">What if I have no internet?</summary><p class="help">Lessons, quizzes and flashcards always work offline. On a phone that can run it, you can also add the offline tutor from Me.</p></details>
     <p class="help"><b>Start with number 1, Google Gemini.</b> It is the easiest, and it also powers Amani's voice and reading photos of pages.</p></div>`;
-  return why + `<p class="help" style="margin:0">Free cloud tutors, ranked. Cloud tutors are much faster than a small offline model. Tap one to see the steps.</p>
+  return keysPanel() + why + `<p class="help" style="margin:0">Free cloud tutors, ranked. Cloud tutors are much faster than a small offline model. Tap one to see the steps.</p>
     <div class="clouds">${PROV_TOP.map((id, i) => card(id, i, false)).join('')}</div>
     <p class="sub-h">Other options</p><div class="clouds">${PROV_ALT.map((id, i) => card(id, i, true)).join('')}</div>`;
 }
@@ -332,14 +340,14 @@ function lessonHtml(l, idx, total) {
   }).join('');
   const outs = (l.outcomes || []).length ? `<div class="example" style="border-style:solid"><p class="lbl">By the end of this lesson you can</p><div class="in"><ul>${l.outcomes.map((o) => `<li>${inline(o)}</li>`).join('')}</ul></div></div>` : '';
   const practice = (p.quiz || []).filter((q) => q.lesson === l.id && !q.inline);
-  const prac = practice.length ? `<h2>Practice questions</h2>` + practice.map((q, n) => checkHtml(q, `Practice ${n + 1} of ${practice.length}`)).join('') : '';
+  const prac = practice.length ? `<h2 class="nofollow">Practice questions</h2>` + practice.map((q, n) => checkHtml(q, `Practice ${n + 1} of ${practice.length}`)).join('') : '';
   const prev = idx > 0 ? lessons()[idx - 1] : null;
   const next = idx < total - 1 ? lessons()[idx + 1] : null;
   const nav = `<div class="lesson-nav">${prev ? `<button class="btn" data-act="lesson" data-id="${prev.id}">Previous: ${esc(prev.title)}</button>` : '<span></span>'}` +
     (next ? `<button class="btn primary" data-act="finish" data-id="${l.id}" data-next="${next.id}">Next: ${esc(next.title)}</button>`
           : `<button class="btn primary" data-act="finish" data-id="${l.id}">Finish the pack</button>`) + '</div>';
-  return `<div class="sheet pn-strong"><div class="hair" aria-hidden="true"></div><article class="prose">
-    <header class="head"><div class="orn" aria-hidden="true"></div><p class="eyebrow">Lesson ${idx + 1} of ${total}. About ${l.minutes} minutes.</p><h1>${esc(l.title)}</h1><p class="lede">${esc(l.subtitle)}</p>${REG.hooks.lessonHead ? REG.hooks.lessonHead(l) : ''}</header>
+  return `<div class="sheet pn-strong"><div class="hair" aria-hidden="true"></div><article class="prose" data-pid="${esc(p.id)}" data-lid="${esc(l.id)}">
+    <header class="head"><div class="orn" aria-hidden="true"></div><p class="eyebrow">Lesson ${idx + 1} of ${total}. About ${l.minutes} minutes.</p><h1>${esc(l.title)}</h1><p class="lede">${esc(l.subtitle)}</p>${REG.hooks.lessonHead ? REG.hooks.lessonHead(l, p.id) : ''}</header>
     ${outs}${blocks}${REG.hooks.lessonExtra ? REG.hooks.lessonExtra(l) : ''}${prac}${nav}</article></div>`;
 }
 
@@ -604,7 +612,7 @@ function screenHome() {
   return `<div class="page home">
     <div class="greet kv-in"><div class="av" data-amani="64"></div><div><h1>${greeting()}${nm}.</h1><p>What shall we learn today?</p></div></div>
     ${cont}
-    ${offlineNudge()}
+    ${keysNudge()}${offlineNudge()}
     ${REG.hooks.homeCard ? REG.hooks.homeCard() : ''}
     <section class="alive kv-in" style="--d:2" aria-label="Ideas and tips"><p class="sec-title" style="margin:0 0 8px">Today on Knowvia</p><div class="track" id="alive">${cards}</div><div class="dots" id="alive-dots">${FACTS.map((x, i) => `<i class="${i === 0 ? 'on' : ''}"></i>`).join('')}</div></section>
     <h2 class="sec-title" style="margin:6px 0 -6px">Go to</h2>
@@ -616,6 +624,12 @@ function screenHome() {
       ${tile('nav" data-r="mysources', I.upload, 'Your own sources', 'Add a PDF, link or notes and learn from them.', 7)}
       ${tile('nav" data-r="build', I.spark, 'Build a course', 'Pick a topic and let Amani build it.', 8)}
     </div></div>`;
+}
+function keysNudge() {
+  const n = keysOn().length;
+  if (!S.onboarded || n === 0 || n >= 3 || (S.hints.keysUntil || 0) > Date.now()) return '';
+  return `<section class="nudge pn-strong kv-in" style="--d:2"><span class="ico">${ic(I.cloud, 24, 1.8)}</span><div class="grow"><b>Connect all three free keys (${n} of 3)</b><p>Amani switches by herself when one is busy, and courses build faster. About two minutes each, once.</p></div>
+    <div class="row-actions"><button class="btn primary sm" data-act="nav" data-r="me">Connect the rest</button><button class="btn sm" data-act="keysoff">Not now</button></div></section>`;
 }
 function offlineNudge() {
   if (!S.onboarded || !tutorReady() || localModelList().length || (S.hints.offlineUntil || 0) > Date.now()) return '';
@@ -1514,6 +1528,7 @@ document.addEventListener('click', (ev) => {
     case 'errdismiss': { clearErrors(chat()); save(); renderTutor(); break; }
     case 'useoffline': if (REG.hooks.switchOffline) REG.hooks.switchOffline(); break;
     case 'listen': speak(+d.i); break;
+    case 'keysoff': S.hints.keysUntil = Date.now() + 3 * 86400000; save(); renderScreen(); break;
     case 'nudgeoff': S.hints.offlineUntil = Date.now() + 7 * 86400000; save(); renderScreen(); break;
     case 'freshask': t.outerHTML = '<span class="help">This erases your progress, your name, your chosen look and any saved API keys on this device, then shows the welcome again. Courses you built stay. </span><button class="btn" data-act="freshyes">Yes, start fresh</button> <button class="btn" data-act="nav" data-r="me">Cancel</button>'; break;
     case 'freshyes': try { localStorage.removeItem(KEY); } catch (e) {} S = defaults(); window.__fresh = true; location.hash = ''; location.reload(); break;
@@ -1592,7 +1607,7 @@ function selShow() {
   let p = $('#selpop');
   const lesson = !!$('#scroll .prose');
   const btn = (a, ico, label, extra) => `<button type="button" class="sp-b ${extra || ''}" data-sel="${a}" aria-label="${label}" title="${label}">${ic(ico, 18, 1.9)}<span>${label}</span></button>`;
-  const html = btn('ask', I.chat, 'Ask Amani', 'main') + btn('simple', I.bulb, 'Explain simply') + btn('copy', I.copy, 'Copy') + (canSpeakNow() ? btn('listen', I.speaker, 'Listen') : '');
+  const html = btn('ask', I.chat, 'Ask Amani', 'main') + btn('simple', I.bulb, 'Explain simply') + btn('copy', I.copy, 'Copy') + (canSpeakNow() ? (lesson && REG.hooks.listenFrom ? btn('from', I.speaker, 'Listen from here') : '') + btn('listen', I.speaker, 'Listen') : '');
   if (!p) { p = document.createElement('div'); p.id = 'selpop'; p.className = 'selpop'; p.setAttribute('role', 'toolbar'); p.setAttribute('aria-label', 'Actions for the selected text'); document.body.appendChild(p); }
   p.innerHTML = html;
   const w = p.offsetWidth, h = p.offsetHeight, vw = window.innerWidth, touch = matchMedia('(pointer:coarse)').matches;
@@ -1618,6 +1633,7 @@ document.addEventListener('click', (ev) => {
     const ok = () => { toast('Copied'); done(); };
     try { navigator.clipboard.writeText(txt).then(ok, () => { fallbackCopy(txt); ok(); }); } catch (e) { fallbackCopy(txt); ok(); }
   }
+  else if (a === 'from') { try { if (REG.hooks.listenFrom) REG.hooks.listenFrom(); } catch (e) { toast('Could not start from there'); } done(); }
   else if (a === 'listen') {
     try { stopSpeak(); if (REG.hooks.speakText) { if (!REG.hooks.speakText(txt, { key: 'sel', title: 'Selected text' })) toast('No voice is ready. Open Me, then Voice.'); } else { const u = new SpeechSynthesisUtterance(txt); const v = speechSynthesis.getVoices().find((x) => /^en/i.test(x.lang)); if (v) u.voice = v; u.rate = 0.95; speechSynthesis.speak(u); } } catch (e) {}
     done();

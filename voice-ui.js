@@ -78,6 +78,8 @@ function offHtml() {
 function storeHtml() {
   const V = K().V();
   return `<label class="switchrow"><input type="checkbox" data-in="v-rewrite" ${V.rewrite ? 'checked' : ''}><span><b>Write lessons for the ear</b><span class="s">Amani rewrites each lesson as a natural spoken script before it is read, using one cloud write per lesson. Switch off to read the lesson text as it is.</span></span></label>
+    <label class="switchrow"><input type="checkbox" data-in="v-follow" ${V.follow !== false ? 'checked' : ''}><span><b>Highlight the text as it is read</b><span class="s">The sentence and word being spoken are marked on the lesson page, so you can read along.</span></span></label>
+    <label class="switchrow"><input type="checkbox" data-in="v-auto" ${V.auto !== false ? 'checked' : ''}><span><b>Scroll along automatically</b><span class="s">The page moves with the voice. If you scroll yourself, it waits until you tap Follow along.</span></span></label>
     <label class="switchrow"><input type="checkbox" data-in="v-next" ${V.autoNext ? 'checked' : ''}><span><b>Keep going to the next lesson</b><span class="s">When a lesson ends, the next one starts by itself.</span></span></label>
     <p class="help" id="v-store">Saved audio: checking...</p><div class="row-actions"><button class="btn" data-act="v-clear">Clear saved audio</button></div>`;
 }
@@ -103,6 +105,8 @@ REG.ins['v-off'] = (t) => { const V = K().V(); V.off[K().roleId()] = parseInt(t.
 REG.ins['v-phone'] = (t) => { K().V().phone = t.value; };
 REG.ins['v-rewrite'] = (t) => { K().V().rewrite = !!t.checked; };
 REG.ins['v-next'] = (t) => { K().V().autoNext = !!t.checked; };
+REG.ins['v-follow'] = (t) => { K().V().follow = !!t.checked; A().save(); };
+REG.ins['v-auto'] = (t) => { K().V().auto = !!t.checked; A().save(); };
 R['v-hear'] = async (t, d) => {
   const e = d.v, el = document.getElementById('vlab-' + e); if (el) el.textContent = 'Getting a sample...';
   const r = await K().sample(e);
@@ -135,21 +139,24 @@ REG.hooks.meCard = () => {
   return (prevMe ? prevMe() : '') + `<section class="setting pn-strong"><h3>Voice</h3><p class="help">${esc(line)}</p><div class="row-actions"><button class="btn ${any ? '' : 'primary'}" data-act="nav" data-r="voice">${any ? 'Voice settings' : 'Set up a voice'}</button></div></section>`;
 };
 
-/* ---------------- Listen on a lesson ---------------- */
+/* ---------------- Listen on a lesson ----------------
+   Everything here is keyed by "course/lesson" (uid), never by the lesson number alone. */
 const SAVED = Object.create(null);
-function headHtml(l) {
-  const v = K(), PL = v.PL, here = PL.lessonId === l.id && PL.st !== 'idle', prep = v.PREP.id === l.id ? v.PREP : null, can = v.canSpeak(), eng = v.usable()[0];
-  if (!can) return `<div class="lhear" data-lid="${l.id}"><button class="btn" data-act="nav" data-r="voice">${ic('speaker')} Set up a voice to listen</button></div>`;
-  const playing = here && PL.st === 'playing', loading = here && PL.st === 'loading', paused = here && PL.st === 'paused';
-  const label = playing ? 'Pause' : paused ? 'Resume' : loading ? 'Getting ready...' : (v.V().pos[l.id] > 0 ? 'Continue listening' : 'Listen to this lesson');
+function headHtml(l, pid) {
+  const uid = K().uidOf(pid, l.id), v = K(), PL = v.PL, here = PL.lessonId === uid && PL.st !== 'idle', prep = v.PREP.id === uid ? v.PREP : null, can = v.canSpeak(), eng = v.usable()[0];
+  if (!can) return `<div class="lhear" data-uid="${esc(uid)}"><button class="btn" data-act="nav" data-r="voice">${ic('speaker')} Set up a voice to listen</button></div>`;
+  const playing = here && PL.st === 'playing', loading = here && PL.st === 'loading', paused = here && PL.st === 'paused', at = v.resumeAt(uid);
+  const label = playing ? 'Pause' : paused ? 'Resume' : loading ? 'Getting ready...' : (at > 0 ? 'Continue listening (' + Math.round(at * 100) + '%)' : 'Listen to this lesson');
+  const sv = SAVED[uid] || {};
   let line = '';
-  if (here && PL.err) line = PL.err; else if (prep && prep.st === 'running') line = 'Saving audio: part ' + Math.min(prep.i + 1, prep.n || 1) + ' of ' + (prep.n || '...'); else if (prep && prep.st === 'error') line = prep.err; else if (prep && prep.st === 'done') line = 'Saved. This lesson now plays instantly, even offline.'; else if (SAVED[l.id] && SAVED[l.id].saved) line = 'Saved on this phone: plays instantly, even offline.'; else line = 'About ' + l.minutes + ' minutes · ' + (eng === 'cloud' ? 'cloud voice' : eng === 'offline' ? 'offline voice' : 'phone voice');
-  const save = eng && eng !== 'phone' && !(SAVED[l.id] && SAVED[l.id].saved) ? (prep && prep.st === 'running' ? `<button class="btn sm" data-act="v-save-cancel">Stop saving</button>` : `<button class="btn sm" data-act="v-save" data-id="${l.id}">Save audio</button>`) : '';
-  return `<div class="lhear" data-lid="${l.id}"><button class="btn primary lplay ${playing ? 'on' : ''}" data-act="v-lesson" data-id="${l.id}">${ic('speaker')} ${label}</button>${save}<span class="help lline" role="status">${esc(line)}</span></div>`;
+  if (here && PL.err) line = PL.err; else if (prep && prep.st === 'running') line = 'Saving audio: part ' + Math.min(prep.i + 1, prep.n || 1) + ' of ' + (prep.n || '...'); else if (prep && prep.st === 'error') line = prep.err; else if (prep && prep.st === 'done') line = 'Saved. This lesson now plays instantly, even offline.'; else if (sv.saved) line = 'Saved on this phone. Plays instantly, even offline.';
+  const restart = !here && at > 0 ? `<button class="btn sm" data-act="v-lesson" data-id="${esc(uid)}" data-from="0">Start over</button>` : '';
+  const save = eng && eng !== 'phone' && !sv.saved ? (prep && prep.st === 'running' ? `<button class="btn sm" data-act="v-save-cancel">Stop saving</button>` : `<button class="btn sm" data-act="v-save" data-id="${esc(uid)}">Save audio</button>`) : '';
+  return `<div class="lhear" data-uid="${esc(uid)}"><button class="btn primary lplay ${playing ? 'on' : ''}" data-act="v-lesson" data-id="${esc(uid)}">${ic('speaker')} ${label}</button>${restart}${save}<span class="help lline" role="status">${esc(line)}</span></div>`;
 }
-REG.hooks.lessonHead = (l) => { if (!SAVED[l.id]) { SAVED[l.id] = { saved: false }; K().savedState(l.id).then((s) => { SAVED[l.id] = s; paintHead(); }).catch(() => {}); } return headHtml(l); };
-function paintHead() { document.querySelectorAll('.lhear[data-lid]').forEach((e) => { const l = A().lessonById(e.dataset.lid); if (l) e.outerHTML = headHtml(l); }); }
-R['v-lesson'] = (t, d) => { K().playLesson(d.id); };
+REG.hooks.lessonHead = (l, pid) => { const uid = K().uidOf(pid, l.id); if (!SAVED[uid]) { SAVED[uid] = { saved: false }; K().savedState(uid).then((s2) => { SAVED[uid] = s2; paintHead(); }).catch(() => {}); } return headHtml(l, pid); };
+function paintHead() { document.querySelectorAll('.lhear[data-uid]').forEach((e) => { const r = K().lessonRef(e.dataset.uid); if (r) e.outerHTML = headHtml(r.l, r.pid); }); }
+R['v-lesson'] = (t, d) => { K().playLesson(d.id, d.from === '0' ? { from: 0 } : undefined); };
 R['v-save'] = (t, d) => { K().prepare(d.id).then(() => { delete SAVED[d.id]; paintHead(); }); paintHead(); };
 R['v-save-cancel'] = () => { K().cancelPrepare(); paintHead(); };
 
@@ -159,30 +166,44 @@ function bar() {
   if (!b) { b = document.createElement('div'); b.id = 'aplayer'; b.className = 'aplayer pn-strong'; b.hidden = true; b.setAttribute('role', 'region'); b.setAttribute('aria-label', 'Audio lesson player'); document.body.appendChild(b); }
   return b;
 }
-let lastBar = '';
+let lastBar = '', tickT = 0, DRAG = false;
+const mmss = (x) => { x = Math.max(0, Math.round(x)); return Math.floor(x / 60) + ':' + String(x % 60).padStart(2, '0'); };
+function tick() {
+  const v = K(), PL = v.PL, r = document.getElementById('ap-range'); if (!r || PL.kind !== 'lesson' || !PL.items.length) return;
+  const tl = v.timeline(), el = document.getElementById('ap-el'), tt = document.getElementById('ap-tot');
+  if (!DRAG) { r.value = tl.tot ? Math.round(tl.el / tl.tot * 1000) : 0; if (el) el.textContent = mmss(tl.el); }
+  if (tt) tt.textContent = (tl.exact ? '' : '~') + mmss(tl.tot);
+}
 function paintBar(PL) {
   const b = bar(), show = PL.kind === 'lesson' && PL.st !== 'idle';
-  if (!show) { b.hidden = true; lastBar = ''; return; }
-  const n = PL.items.length, i = Math.min(PL.i, Math.max(0, n - 1)), pct = n ? Math.round(PL.i / n * 100) : 0;
+  if (!show) { b.hidden = true; lastBar = ''; clearInterval(tickT); tickT = 0; return; }
+  const n = PL.items.length, i = Math.min(PL.i, Math.max(0, n - 1));
   const status = PL.st === 'error' ? PL.err : PL.st === 'loading' && !n ? (PL.note || 'Getting the lesson ready...') : PL.st === 'loading' ? 'Getting the next part...' : n ? 'Part ' + (i + 1) + ' of ' + n : '';
   const playing = PL.st === 'playing', rate = K().V().rate || 1;
   const key = [PL.st, PL.i, n, PL.title, status, rate, PL.note].join('|');
-  if (key === lastBar && !b.hidden) return; lastBar = key;
+  if (key === lastBar && !b.hidden) { tick(); return; } lastBar = key;
   b.hidden = false;
+  const back = A().ic('<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><text x="12" y="15.4" font-size="7.6" font-weight="800" text-anchor="middle" fill="currentColor" stroke="none">20</text>', 24, 1.9);
+  const fwd = A().ic('<path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/><text x="12" y="15.4" font-size="7.6" font-weight="800" text-anchor="middle" fill="currentColor" stroke="none">20</text>', 24, 1.9);
+  const keep = document.getElementById('ap-range'), val = keep ? keep.value : 0;
   b.innerHTML = `<div class="ap-top"><button class="ap-title linkbtn" data-act="v-open" aria-label="Open this lesson">${esc(PL.title)}</button><button class="ap-x" data-act="v-stop" aria-label="Close the player">${A().ic('<path d="M6 6l12 12M18 6L6 18"/>', 18, 2)}</button></div>
-    <div class="ap-bar" aria-hidden="true"><i style="width:${pct}%"></i></div>
+    <div class="ap-seek"><span class="ap-t" id="ap-el">0:00</span><input type="range" id="ap-range" min="0" max="1000" step="1" value="${val}" aria-label="Move through the lesson" ${n ? '' : 'disabled'}><span class="ap-t" id="ap-tot"></span></div>
     <div class="ap-row"><span class="ap-st" role="status">${esc(status)}${PL.note && n ? ' ' + esc(PL.note) : ''}</span><span class="ap-ctl">
-    <button class="ap-b" data-act="v-prev" aria-label="Previous part" ${n ? '' : 'disabled'}>${A().ic('<path d="M7 6v12M18 6l-8 6 8 6z"/>', 20, 2)}</button>
+    <button class="ap-b" data-act="v-back" aria-label="Back 20 seconds" ${n ? '' : 'disabled'}>${back}</button>
     <button class="ap-b big" data-act="v-toggle" aria-label="${playing ? 'Pause' : 'Play'}">${PL.st === 'loading' ? '<span class="typing"><i></i><i></i><i></i></span>' : playing ? A().ic('<path d="M8 5v14M16 5v14"/>', 22, 2.4) : A().ic('<path d="M8 5l11 7-11 7z"/>', 22, 2)}</button>
-    <button class="ap-b" data-act="v-nxt" aria-label="Next part" ${n ? '' : 'disabled'}>${A().ic('<path d="M17 6v12M6 6l8 6-8 6z"/>', 20, 2)}</button>
+    <button class="ap-b" data-act="v-fwd" aria-label="Forward 20 seconds" ${n ? '' : 'disabled'}>${fwd}</button>
     <button class="ap-sp" data-act="v-speed" aria-label="Speaking speed">${rate === 1 ? '1x' : rate + 'x'}</button></span></div>`;
+  tick(); if (!tickT) tickT = setInterval(tick, 300);
 }
-R['v-toggle'] = () => { const v = K(); if (v.PL.st === 'paused') v.resume(); else if (v.PL.st === 'playing' || v.PL.st === 'loading') v.pause(); else if (v.PL.st === 'error' && v.PL.lessonId) v.playLesson(v.PL.lessonId, { from: v.PL.i }); };
-R['v-prev'] = () => K().skip(-1);
-R['v-nxt'] = () => K().skip(1);
+document.addEventListener('input', (ev) => { const r = ev.target; if (r && r.id === 'ap-range') { DRAG = true; const tl = K().timeline(), el = document.getElementById('ap-el'); if (el) el.textContent = mmss(tl.tot * r.value / 1000); } });
+document.addEventListener('change', (ev) => { const r = ev.target; if (r && r.id === 'ap-range') { const tl = K().timeline(); DRAG = false; K().seekGlobal(tl.tot * r.value / 1000); } });
+R['v-toggle'] = () => { const v = K(); if (v.PL.st === 'paused') v.resume(); else if (v.PL.st === 'playing' || v.PL.st === 'loading') v.pause(); else if (v.PL.st === 'error' && v.PL.lessonId) v.playLesson(v.PL.lessonId, { frac: v.progress().frac }); };
+R['v-back'] = () => K().seekBy(-20);
+R['v-fwd'] = () => K().seekBy(20);
 R['v-stop'] = () => K().stop();
-R['v-open'] = () => { const id = K().PL.lessonId; if (id) A().go('lesson/' + id); };
+R['v-open'] = () => { const r = K().lessonRef(K().PL.lessonId); if (!r) return; if (A().S.activePack !== r.pid) { A().S.activePack = r.pid; A().save(); } A().go('lesson/' + r.lid); };
 R['v-speed'] = () => { const L = [0.8, 1, 1.15, 1.3, 1.5], r = K().V().rate || 1, i = L.findIndex((x) => Math.abs(x - r) < 0.01); K().setRate(L[(i + 1) % L.length]); };
+
 K().subscribe((PL) => {
   paintBar(PL); paintHead();
   document.querySelectorAll('.listen.on').forEach((b) => b.classList.toggle('busy', PL.st === 'loading'));

@@ -12,10 +12,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const RATE = 16000;   /* everything is stored and played as 16 kHz mono: clear for speech, and small */
 
 /* ---------------- Settings ---------------- */
-const DEF = { engine: 'auto', rate: 1, rewrite: true, autoNext: false, threads: 0, cloud: {}, off: {}, phone: '', pos: {}, cbUntil: 0 };
+const DEF = { engine: 'auto', rate: 1, rewrite: true, autoNext: false, threads: 0, cloud: {}, off: {}, phone: '', pos: {}, cbUntil: 0, follow: true, auto: true };
 function V() {
   const S = A().S; if (!S.voice || typeof S.voice !== 'object') S.voice = {};
   const v = S.voice; Object.keys(DEF).forEach((k) => { if (v[k] === undefined) v[k] = (typeof DEF[k] === 'object') ? JSON.parse(JSON.stringify(DEF[k])) : DEF[k]; });
+  if (v.pos && Object.keys(v.pos).some((k) => typeof v.pos[k] !== 'object')) { Object.keys(v.pos).forEach((k) => { if (typeof v.pos[k] !== 'object') delete v.pos[k]; }); }   /* positions from before lessons had unique ids */
   return v;
 }
 const roleId = () => { try { return (A().S.persona && A().S.persona.role) || 'amani'; } catch (e) { return 'amani'; } };
@@ -305,7 +306,12 @@ async function makeClip(engine, text, signal) {
 }
 
 /* ---------------- The player ---------------- */
-const PL = { id: 0, items: [], i: 0, st: 'idle', engine: '', kind: '', key: '', title: '', lessonId: '', rate: 1, err: '', note: '', paused: false, utter: null, startedAt: 0 };
+const PL = { id: 0, items: [], i: 0, st: 'idle', engine: '', kind: '', key: '', title: '', lessonId: '', rate: 1, err: '', note: '', paused: false, utter: null, startedAt: 0, seek: null, wt: 0, phoneT: 0, phoneAt: 0 };
+/* How long each word takes to say is not the same as how long it is: full stops and commas carry a pause. These weights are used to guess where in a piece the voice is. */
+const ww = (ch) => (ch === '.' || ch === '!' || ch === '?' || ch === '…' ? 9 : ch === ',' || ch === ';' || ch === ':' ? 3 : ch === '\n' ? 6 : ch === ' ' ? 0.4 : 1);
+const W = (t) => { let n = 0; for (let k = 0; k < t.length; k++) n += ww(t[k]); return n; };
+function mkItems(texts) { let c = 0; const items = texts.map((t) => { const w = W(t), it = { text: t, w0: c, w, dur: 0 }; c += w; return it; }); return { items, wt: c }; }
+const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const plSubs = [];
 const plEmit = () => plSubs.forEach((f) => { try { f(PL); } catch (e) { /* ignore */ } });
 let AU = null, abortCtl = null, lastUrl = '';
@@ -317,21 +323,32 @@ function setSession() {
     ms.metadata = new window.MediaMetadata({ title: PL.title || 'Knowvia', artist: 'Amani · Knowvia', album: PL.kind === 'lesson' ? 'Audio lesson' : 'Read aloud' });
     ms.setActionHandler('play', () => resume()); ms.setActionHandler('pause', () => pause());
     ms.setActionHandler('nexttrack', () => skip(1)); ms.setActionHandler('previoustrack', () => skip(-1));
+    try { ms.setActionHandler('seekbackward', () => seekBy(-20)); ms.setActionHandler('seekforward', () => seekBy(20)); ms.setActionHandler('seekto', (d) => { if (d && d.seekTime != null) seekGlobal(d.seekTime); }); } catch (e) { /* older WebViews */ }
   } catch (e) { /* not supported here */ }
 }
-function stop() {
-  PL.id++; if (abortCtl) { try { abortCtl.abort(); } catch (e) { /* ignore */ } abortCtl = null; }
+function savePos() {
+  try {
+    if (PL.kind !== 'lesson' || !PL.lessonId || !PL.items.length || PL.st === 'idle') return;
+    const n = nowPos(), it = PL.items[n.i]; if (!it || !PL.wt) return;
+    const d = estDur(it), f = (it.w0 + it.w * (d ? clamp(n.t / d, 0, 1) : 0)) / PL.wt;
+    if (f > 0.985 || f < 0.01) delete V().pos[PL.lessonId]; else V().pos[PL.lessonId] = { f: Math.round(f * 1000) / 1000, at: Date.now() };
+    A().save();
+  } catch (e) { /* ignore */ }
+}
+function stop(soft) {
+  savePos(); PL.id++; if (abortCtl) { try { abortCtl.abort(); } catch (e) { /* ignore */ } abortCtl = null; }
   try { if (phoneOk()) window.speechSynthesis.cancel(); } catch (e) { /* ignore */ }
   if (AU) { try { AU.pause(); AU.removeAttribute('src'); AU.load(); } catch (e) { /* ignore */ } }
   if (lastUrl) { try { URL.revokeObjectURL(lastUrl); } catch (e) { /* ignore */ } lastUrl = ''; }
-  PL.st = 'idle'; PL.items = []; PL.i = 0; PL.paused = false; PL.err = ''; PL.note = ''; PL.kind = ''; PL.lessonId = ''; plEmit();
+  PL.st = 'idle'; PL.items = []; PL.i = 0; PL.paused = false; PL.err = ''; PL.note = ''; PL.kind = ''; PL.lessonId = ''; PL.seek = null; PL.wt = 0; PL.phoneT = 0; if (!soft) plEmit();
 }
-function playClip(clip, id) {
+function playClip(clip, id, off) {
   return new Promise((res) => {
     const a = audioEl(), blob = toWav(clip.pcm, RATE);
     if (lastUrl) { try { URL.revokeObjectURL(lastUrl); } catch (e) { /* ignore */ } }
     lastUrl = URL.createObjectURL(blob); a.src = lastUrl; a.defaultPlaybackRate = PL.rate; a.playbackRate = PL.rate;
-    const done = (ok) => { a.onended = a.onerror = a.onpause = null; res(ok); };
+    const done = (ok) => { a.onended = a.onerror = a.onpause = a.onloadedmetadata = null; res(ok); };
+    a.onloadedmetadata = () => { if (off > 0.05) { try { a.currentTime = Math.min(off, Math.max(0, (a.duration || off) - 0.15)); } catch (e) { /* ignore */ } } };
     a.onended = () => done(true);
     a.onerror = () => done(false);
     a.onpause = () => { if (PL.id !== id) return done(false); };
@@ -345,7 +362,7 @@ function speakPhone(text, id) {
     const u = new SpeechSynthesisUtterance(text), v = pickPhoneVoice(); if (v) { u.voice = v; u.lang = v.lang; } else u.lang = 'en';
     const hk = REG.hooks.voice ? REG.hooks.voice() : {}; u.rate = Math.min(2, PL.rate * (hk.rate || 1)); u.pitch = hk.pitch || 1;
     u.onend = () => res(true); u.onerror = () => res(false);
-    PL.utter = u; PL.st = 'playing'; plEmit(); try { window.speechSynthesis.speak(u); } catch (e) { res(false); }
+    PL.utter = u; PL.st = 'playing'; PL.phoneT = 0; PL.phoneAt = performance.now(); plEmit(); try { window.speechSynthesis.speak(u); } catch (e) { res(false); }
   });
 }
 function phoneVoices() { try { return (window.speechSynthesis.getVoices() || []).filter((v) => /^en/i.test(v.lang)); } catch (e) { return []; } }
@@ -384,103 +401,164 @@ async function clipFor(text, id) {
 }
 async function run(id) {
   while (PL.id === id && PL.i < PL.items.length) {
-    const text = PL.items[PL.i].text; PL.st = 'loading'; plEmit();
-    if (PL.paused) { await new Promise((r) => { PL.wake = r; }); if (PL.id !== id) return; }
+    const item = PL.items[PL.i], text = item.text; PL.st = 'loading'; plEmit();
+    if (PL.paused) { PL.st = 'paused'; plEmit(); await new Promise((r) => { PL.wake = r; }); if (PL.id !== id) return; PL.st = 'loading'; plEmit(); }
     let got;
     try { got = await clipFor(text, id); } catch (e) { if (PL.id !== id) return; PL.st = 'error'; plEmit(); return; }
     if (PL.id !== id) return;
-    for (let k = i2(PL.i + 1); k <= PL.i + 2 && k < PL.items.length; k++) { if (got.eng !== 'phone') makeClip(got.eng, PL.items[k].text, abortCtl && abortCtl.signal).catch(() => {}); }
+    if (got.clip) item.dur = got.clip.pcm.length / RATE;
+    const lookahead = PL.items;
+    for (let k = PL.i + 1; k <= PL.i + 2 && k < lookahead.length; k++) { if (got.eng !== 'phone') { const it = lookahead[k]; makeClip(got.eng, it.text, abortCtl && abortCtl.signal).then((c) => { if (c && c.pcm) it.dur = c.pcm.length / RATE; }).catch(() => {}); } }
+    let off = 0; const sk = PL.seek; PL.seek = null;
+    if (sk) { const d = item.dur || estDur(item); off = sk.off != null ? sk.off : (sk.frac || 0) * d; off = clamp(off, 0, Math.max(0, d - 0.3)); if (off < 0.4) off = 0; }
+    if (PL.paused) { PL.st = 'paused'; plEmit(); await new Promise((r) => { PL.wake = r; }); if (PL.id !== id) return; }
     let ok;
     for (;;) {
-      ok = got.clip ? await playClip(got.clip, id) : await speakPhone(text, id);
+      ok = got.clip ? await playClip(got.clip, id, off) : await speakPhone(text, id);
       if (PL.id !== id) return;
-      if (PL.paused) { await new Promise((r) => { PL.wake = r; }); if (PL.id !== id) return; continue; }
+      if (PL.paused) { await new Promise((r) => { PL.wake = r; }); if (PL.id !== id) return; off = 0; continue; }
       break;
     }
     if (!ok) { PL.err = 'The sound could not be played.'; PL.st = 'error'; plEmit(); return; }
-    PL.i++; if (PL.lessonId) { V().pos[PL.lessonId] = PL.i >= PL.items.length ? 0 : PL.i; A().save(); }
+    PL.i++; PL.phoneT = 0;
+    if (PL.lessonId) { if (PL.i >= PL.items.length) delete V().pos[PL.lessonId]; else savePos(); A().save(); }
     plEmit();
   }
   if (PL.id === id) { const cb = PL.onEnd, was = PL.kind; PL.st = 'idle'; PL.items = []; plEmit(); if (cb) { try { cb(was); } catch (e) { /* ignore */ } } }
 }
 const i2 = (n) => n;
 function start(items, o) {
-  o = o || {}; stop();
-  const id = ++PL.id; PL.items = items; PL.i = Math.max(0, Math.min(items.length - 1, o.from || 0)); PL.kind = o.kind || 'chat'; PL.key = o.key || ''; PL.title = o.title || ''; PL.lessonId = o.lessonId || ''; PL.rate = V().rate || 1;
-  PL.onEnd = o.onEnd; PL.err = ''; PL.note = ''; PL.failed = []; PL.paused = false; PL.engine = usable(V().engine)[0] || '';
+  o = o || {}; stop(true);
+  if (items.length && typeof items[0] === 'string') { const m = mkItems(items); items = m.items; o.wt = m.wt; }
+  const id = ++PL.id; PL.items = items; PL.i = clamp(o.from || 0, 0, Math.max(0, items.length - 1)); PL.kind = o.kind || 'chat'; PL.key = o.key || ''; PL.title = o.title || ''; PL.lessonId = o.lessonId || ''; PL.rate = V().rate || 1;
+  PL.wt = o.wt || items.reduce((n, it) => n + it.w, 0); PL.seek = o.seek || null;
+  PL.onEnd = o.onEnd; PL.err = ''; PL.note = ''; PL.failed = []; PL.paused = !!o.paused; PL.engine = usable(V().engine)[0] || '';
   abortCtl = new AbortController();
   if (!PL.engine) { PL.err = 'No voice is ready. Open Voice settings to set one up.'; PL.st = 'error'; plEmit(); return false; }
-  PL.st = 'loading'; plEmit(); run(id); return true;
+  PL.st = PL.paused ? 'paused' : 'loading'; plEmit(); run(id); if (PL.kind === 'lesson') learnDurations(items, PL.engine, id); return true;
+}
+/* sound that was saved earlier tells its length without being played: this makes the progress bar exact */
+async function learnDurations(items, eng, id) {
+  if (eng === 'phone') return;
+  try {
+    for (const it of items) { if (PL.id !== id) return; if (it.dur) continue; const s = await clipGet(hash(eng + '|' + voiceTag(eng) + '|' + it.text)); if (s && s.buf) it.dur = s.buf.byteLength / 2 / RATE; }
+    if (PL.id === id) plEmit();
+  } catch (e) { /* ignore */ }
+}
+
+/* ---- where are we, and moving around ---- */
+const spc = () => { let c = 0, t = 0; PL.items.forEach((it) => { if (it.dur) { c += it.text.length; t += it.dur; } }); return c > 200 ? t / c : 0.068; };
+function estDur(it) { return it.dur || it.text.length * spc(); }
+function nowPos() {
+  let t = 0;
+  if (PL.engine === 'phone') t = PL.phoneT + (PL.st === 'playing' ? (performance.now() - PL.phoneAt) / 1000 * PL.rate : 0);
+  else if (AU && AU.src && (PL.st === 'playing' || PL.st === 'paused')) t = AU.currentTime || 0;
+  else if (PL.seek && PL.seek.off != null) t = PL.seek.off;
+  return { i: PL.i, t };
+}
+function timeline() {
+  let el = 0, tot = 0, exact = true; PL.items.forEach((it, k) => { const d = estDur(it); if (!it.dur) exact = false; if (k < PL.i) el += d; tot += d; });
+  const it = PL.items[PL.i]; el += it ? Math.min(nowPos().t, estDur(it)) : 0; return { el, tot, exact };
+}
+/* how far through the whole script the voice is, 0 to 1, weighted for pauses */
+function progress() {
+  const it = PL.items[PL.i]; if (!it || !PL.wt) return { frac: 0, i: PL.i };
+  const d = estDur(it), t = clamp(nowPos().t, 0, d), within = d ? t / d : 0;
+  return { frac: (it.w0 + it.w * within) / PL.wt, i: PL.i, within };
+}
+function reopen(extra) {
+  const o = { kind: PL.kind, key: PL.key, title: PL.title, lessonId: PL.lessonId, onEnd: PL.onEnd, wt: PL.wt, paused: PL.st === 'paused' };
+  return start(PL.items, Object.assign(o, extra));
+}
+function seekGlobal(g) {
+  if (!PL.items.length) return; const tl = timeline(); g = clamp(g, 0, Math.max(0, tl.tot - 0.4)); let cum = 0;
+  for (let k = 0; k < PL.items.length; k++) { const d = estDur(PL.items[k]); if (g < cum + d || k === PL.items.length - 1) return reopen({ from: k, seek: { off: Math.max(0, g - cum) } }); cum += d; }
+}
+function seekBy(sec) { if (!PL.items.length) return; seekGlobal(timeline().el + sec); }
+function seekFrac(f) {
+  if (!PL.items.length || !PL.wt) return; const w = clamp(f, 0, 1) * PL.wt;
+  for (let k = 0; k < PL.items.length; k++) { const it = PL.items[k]; if (w < it.w0 + it.w || k === PL.items.length - 1) return reopen({ from: k, seek: { frac: it.w ? clamp((w - it.w0) / it.w, 0, 1) : 0 } }); }
 }
 function pause() {
   if (PL.st !== 'playing' && PL.st !== 'loading') return; PL.paused = true;
   if (AU && !AU.paused) { PL.keepId = PL.id; try { AU.pause(); } catch (e) { /* ignore */ } }
   try { if (phoneOk()) window.speechSynthesis.cancel(); } catch (e) { /* ignore */ }
-  PL.st = 'paused'; plEmit();
+  if (PL.engine === 'phone') PL.phoneT = nowPos().t;
+  PL.st = 'paused'; savePos(); plEmit();
 }
 function resume() {
   if (PL.st !== 'paused') return; PL.paused = false; PL.st = 'loading'; plEmit();
   const w = PL.wake; PL.wake = null; if (w) w();
   if (AU && AU.src && AU.paused && AU.currentTime > 0 && AU.currentTime < AU.duration) { PL.st = 'playing'; AU.play().catch(() => {}); plEmit(); }
 }
-function skip(d) {
-  if (!PL.items.length) return; const to = Math.max(0, Math.min(PL.items.length - 1, PL.i + d)), o = { kind: PL.kind, key: PL.key, title: PL.title, lessonId: PL.lessonId, onEnd: PL.onEnd }, items = PL.items;
-  start(items, Object.assign(o, { from: to }));
-}
+function skip(d) { if (!PL.items.length) return; reopen({ from: clamp(PL.i + d, 0, PL.items.length - 1) }); }
 function setRate(r) { const v = V(); v.rate = r; A().save(); PL.rate = r; if (AU) AU.playbackRate = r; plEmit(); }
 
 /* chat answers and selected text */
 function speakText(text, o) {
   o = o || {}; const clean = speakable(text); if (!clean) return false;
   const eng = usable(V().engine)[0], first = eng === 'phone' ? 400 : eng === 'cloud' ? 160 : 140, max = eng === 'cloud' ? 650 : eng === 'offline' ? 240 : 400;
-  return start(split(clean, max, first).map((t) => ({ text: t })), { kind: 'chat', key: o.key || '', title: o.title || 'Amani', onEnd: o.done });
+  return start(split(clean, max, first), { kind: 'chat', key: o.key || '', title: o.title || 'Amani', onEnd: o.done });
 }
 
-/* ---------------- Lessons as audio ---------------- */
-const OUTLINE = (l) => {
-  const a = A(), ls = a.lessons(), n = ls.findIndex((x) => x.id === l.id) + 1;
+/* ---------------- Lessons as audio ----------------
+   A lesson is named by its course AND its number, "course-id/l3". Every course has an l1, l2, l3, so the number alone is never enough. */
+const uidOf = (pid, lid) => pid + '/' + lid;
+function lessonRef(uid) {
+  const a = A(), i = String(uid || '').indexOf('/'); if (i < 1) return null;
+  const pid = uid.slice(0, i), lid = uid.slice(i + 1), p = (a.PACKS || []).find((x) => x.id === pid); if (!p) return null;
+  const l = a.lessonById(lid, p); return l ? { pid, lid, p, l, uid } : null;
+}
+const OUTLINE = (r) => {
+  const l = r.l, ls = A().lessons(r.p), n = ls.findIndex((x) => x.id === l.id) + 1;
   const outs = (l.outcomes || []).length ? 'By the end of this lesson you can: ' + l.outcomes.map((o) => String(o).replace(/[*_`]/g, '')).join('. ') + '.\n\n' : '';
   return 'Lesson ' + n + '. ' + l.title + '.\n' + (l.subtitle ? l.subtitle + '.\n\n' : '\n') + outs + speakable(l.body);
 };
 const scriptKey = (l) => 'ls:' + l.id + ':' + hash(String(l.body || '') + String(l.title || ''));
-async function lessonScript(l, opt) {
-  opt = opt || {};
-  const base = OUTLINE(l), key = scriptKey(l) + (V().rewrite ? ':r' : ':p'), saved = await scriptGet(key); if (saved && saved.text) return { text: saved.text, rewritten: V().rewrite };
+async function lessonScript(r, opt) {
+  opt = opt || {}; const l = r.l;
+  const base = OUTLINE(r), key = scriptKey(l) + (V().rewrite ? ':r' : ':p'), saved = await scriptGet(key); if (saved && saved.text) return { text: saved.text, rewritten: V().rewrite };
   if (opt.cacheOnly) return V().rewrite ? null : { text: base, rewritten: false };
   if (!V().rewrite || opt.plain) return { text: base, rewritten: false };
   const a = A(); let bc = null; try { bc = a.bestCloud && a.bestCloud(); } catch (e) { bc = null; }
   if (!bc) return { text: base, rewritten: false };
   try {
-    const out = String(await a.llm([{ role: 'system', content: 'You turn lesson text into a script that will be read aloud by a friendly teacher to someone who cannot see the screen. Keep every fact, number, definition and example. Do not add facts. Use short, natural spoken sentences. No markdown, no bullet points, no headings, no tables: say what a table or list contains in a sentence. Say formulas in words. Start with the lesson number and title. Output only the script.' },
+    const out = String(await a.llm([{ role: 'system', content: 'You turn lesson text into a script that will be read aloud by a friendly teacher to someone who cannot see the screen. Keep every fact, number, definition and example, and keep the order of the lesson exactly. Do not add facts. Use short, natural spoken sentences. No markdown, no bullet points, no headings, no tables: say what a table or list contains in a sentence. Say formulas in words. Start with the lesson number and title. Output only the script.' },
       { role: 'user', content: base.slice(0, 9000) }], { model: bc, max: 3500, temp: 0.4, signal: opt.signal }));
     const t = speakable(out);
     if (t.length > base.length * 0.45 && t.length > 400) { await scriptPut(key, t); return { text: t, rewritten: true }; }
   } catch (e) { if (opt.signal && opt.signal.aborted) throw e; }
   return { text: base, rewritten: false };
 }
-function itemsOf(text) { const eng = usable(V().engine)[0]; return split(text, eng === 'cloud' ? 650 : eng === 'offline' ? 240 : 380, eng === 'cloud' ? 220 : 160).map((t) => ({ text: t })); }
+const chunkFor = (eng) => ({ max: eng === 'cloud' ? 650 : eng === 'offline' ? 240 : 380, first: eng === 'cloud' ? 220 : 160 });
+function itemsOf(text, eng) { eng = eng || usable(V().engine)[0]; const c = chunkFor(eng); return mkItems(split(text, c.max, c.first)); }
 const LS = { id: '', busy: false, err: '' };   /* a lesson whose script is being written */
-async function playLesson(id, o) {
-  o = o || {}; const a = A(), l = a.lessonById(id); if (!l) return false;
-  if (PL.lessonId === id && PL.items.length && PL.st !== 'error') { if (PL.st === 'paused') resume(); else if (PL.st === 'playing') pause(); return true; }
+/* where a lesson was left: the share of the lesson already heard (kept per lesson, per course) */
+const resumeAt = (uid) => { const p = V().pos[uid]; return p && typeof p === 'object' && p.f > 0.02 && p.f < 0.985 ? p.f : 0; };
+async function playLesson(uid, o) {
+  o = o || {}; const a = A(), r = lessonRef(uid); if (!r) return false;
+  if (PL.lessonId === uid && PL.items.length && PL.st !== 'error' && o.frac == null) { if (PL.st === 'paused') resume(); else if (PL.st === 'playing') pause(); return true; }
   if (!canSpeak()) { a.toast('Set up a voice first'); a.go('voice'); return false; }
-  LS.id = id; LS.busy = true; LS.err = ''; stop(); PL.title = l.title; PL.lessonId = id; PL.kind = 'lesson'; PL.st = 'loading'; PL.note = V().rewrite ? 'Getting the lesson ready to be heard' : ''; plEmit();
-  let sc; try { sc = await lessonScript(l); } catch (e) { LS.busy = false; stop(); return false; }
-  LS.busy = false; if (LS.id !== id) return false;
-  const items = itemsOf(sc.text), from = o.from != null ? o.from : (V().pos[id] || 0);
-  const next = () => { const ls = a.lessons(), i = ls.findIndex((x) => x.id === id); return V().autoNext && i >= 0 && ls[i + 1] ? ls[i + 1].id : ''; };
-  return start(items, { kind: 'lesson', key: 'lesson:' + id, title: l.title, lessonId: id, from: from >= items.length - 1 ? 0 : from, onEnd: () => { const n = next(); if (n) playLesson(n, { from: 0 }); } });
+  LS.id = uid; LS.busy = true; LS.err = ''; stop(); PL.title = r.l.title; PL.lessonId = uid; PL.kind = 'lesson'; PL.st = 'loading'; PL.note = V().rewrite ? 'Getting the lesson ready to be heard' : ''; plEmit();
+  let sc; try { sc = await lessonScript(r); } catch (e) { LS.busy = false; stop(); return false; }
+  LS.busy = false; if (LS.id !== uid || PL.lessonId !== uid) return false;
+  const m = itemsOf(sc.text), items = m.items;
+  const frac = o.frac != null ? o.frac : (o.from === 0 ? 0 : resumeAt(uid));
+  let from = 0, seek = null;
+  if (frac > 0 && m.wt) { const w = frac * m.wt; from = items.findIndex((it) => w < it.w0 + it.w); if (from < 0) from = items.length - 1; seek = { frac: items[from].w ? clamp((w - items[from].w0) / items[from].w, 0, 1) : 0 }; }
+  const next = () => { const ls = a.lessons(r.p), i = ls.findIndex((x) => x.id === r.lid); return V().autoNext && i >= 0 && ls[i + 1] ? uidOf(r.pid, ls[i + 1].id) : ''; };
+  return start(items, { kind: 'lesson', key: 'lesson:' + uid, title: r.l.title, lessonId: uid, from, seek, wt: m.wt, onEnd: () => { const n = next(); if (n) playLesson(n, { from: 0 }); } });
 }
 
 /* Save a lesson's audio ahead of time, so it plays offline and never waits */
 const PREP = { id: '', i: 0, n: 0, st: 'idle', err: '', engine: '', ctl: null };
 const prSubs = []; const prEmit = () => prSubs.forEach((f) => { try { f(PREP); } catch (e) { /* ignore */ } });
-async function prepare(id) {
-  if (PREP.st === 'running') return; const a = A(), l = a.lessonById(id); if (!l) return;
-  const eng = usable(V().engine).find((x) => x !== 'phone'); if (!eng) { PREP.st = 'error'; PREP.id = id; PREP.err = 'Saving audio needs the cloud voice or the offline voice. The phone\'s own voice cannot be saved.'; prEmit(); return; }
-  PREP.id = id; PREP.st = 'running'; PREP.err = ''; PREP.engine = eng; PREP.i = 0; PREP.n = 0; PREP.ctl = new AbortController(); prEmit();
+async function prepare(uid) {
+  if (PREP.st === 'running') return; const r = lessonRef(uid); if (!r) return;
+  const eng = usable(V().engine).find((x) => x !== 'phone'); if (!eng) { PREP.st = 'error'; PREP.id = uid; PREP.err = 'Saving audio needs the cloud voice or the offline voice. The phone\'s own voice cannot be saved.'; prEmit(); return; }
+  PREP.id = uid; PREP.st = 'running'; PREP.err = ''; PREP.engine = eng; PREP.i = 0; PREP.n = 0; PREP.ctl = new AbortController(); prEmit();
   try {
-    const sc = await lessonScript(l, { signal: PREP.ctl.signal }); const items = split(sc.text, eng === 'cloud' ? 650 : 240, eng === 'cloud' ? 220 : 160); PREP.n = items.length; prEmit();
+    const sc = await lessonScript(r, { signal: PREP.ctl.signal }); const items = itemsOf(sc.text, eng).items.map((x) => x.text); PREP.n = items.length; prEmit();
     for (let i = 0; i < items.length; i++) { if (PREP.st !== 'running') return; await makeClip(eng, items[i], PREP.ctl.signal); PREP.i = i + 1; prEmit(); }
     PREP.st = 'done'; prEmit();
   } catch (e) {
@@ -490,10 +568,10 @@ async function prepare(id) {
 }
 function cancelPrepare() { if (PREP.ctl) { try { PREP.ctl.abort(); } catch (e) { /* ignore */ } } PREP.st = 'idle'; prEmit(); }
 /* was every piece of this lesson already saved? (cheap check by script cache + clips) */
-async function savedState(id) {
-  const l = A().lessonById(id); if (!l) return { saved: false };
+async function savedState(uid) {
+  const r = lessonRef(uid); if (!r) return { saved: false };
   const eng = usable(V().engine).find((x) => x !== 'phone'); if (!eng) return { saved: false };
-  const sc = await lessonScript(l, { cacheOnly: true }); if (!sc) return { saved: false }; const items = split(sc.text, eng === 'cloud' ? 650 : 240, eng === 'cloud' ? 220 : 160);
+  const sc = await lessonScript(r, { cacheOnly: true }); if (!sc) return { saved: false }; const items = itemsOf(sc.text, eng).items.map((x) => x.text);
   let have = 0; for (const t of items) { const k = hash(eng + '|' + voiceTag(eng) + '|' + t); if (await clipGet(k)) have++; }
   return { saved: have === items.length && items.length > 0, have, n: items.length };
 }
@@ -534,7 +612,7 @@ REG.hooks.canSpeak = canSpeak;
 REG.hooks.speakText = (text, o) => speakText(text, o);
 REG.hooks.stopSpeech = (kind) => { if (!kind || PL.kind === kind) stop(); };
 window.KVVoice = { util: { speakable, split, resample, toWav, hash, latex }, V, PL, PREP, OFF, OFF_MODEL, LS, GEM_VOICES, GEM_DEFAULT, OFF_DEFAULT, STYLE, SAMPLE, roleId, gemVoice, offSid, styleOf, AVAIL, usable, order, canSpeak, NAMES,
-  start, stop, pause, resume, skip, setRate, speakText, playLesson, prepare, cancelPrepare, savedState, lessonScript, sample, tuneOffline, storeInfo, clearAudio, offRefresh, offBind, offInstall, offPause, offCancel, offRemove,
+  start, stop, pause, resume, skip, setRate, seekBy, seekGlobal, seekFrac, timeline, progress, nowPos, lessonRef, uidOf, resumeAt, W, ww, speakText, playLesson, prepare, cancelPrepare, savedState, lessonScript, sample, tuneOffline, storeInfo, clearAudio, offRefresh, offBind, offInstall, offPause, offCancel, offRemove,
   phoneVoices, pickPhoneVoice, friendly, gemSpeak, makeClip, subscribe: (f) => { plSubs.push(f); }, subscribePrep: (f) => { prSubs.push(f); }, subscribeOff: (f) => { offSubs.push(f); }, native, VP, setCloudBlock(t) { V().cbUntil = t; A().save(); } };
 REG.ready.push(() => { offBind(); offRefresh(); try { if (phoneOk()) window.speechSynthesis.getVoices(); } catch (e) { /* ignore */ } });
 })();

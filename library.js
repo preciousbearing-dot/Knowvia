@@ -71,6 +71,7 @@ function screen() {
     <div class="lib-tools"><label class="lsearch inset">${a.ic('<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/>', 18, 2)}<input id="lib-q" type="search" placeholder="Search your courses" value="${a.esc(filt.q)}" autocomplete="off" aria-label="Search your courses"></label>
     <div class="seg inset" role="group" aria-label="Filter">${[['all', 'All'], ['going', 'In progress'], ['done', 'Finished']].map(([v, n]) => `<button data-act="lib-f" data-v="${v}" aria-pressed="${filt.f === v}">${n}</button>`).join('')}</div></div></div>
     ${bj ? `<button class="lib-job pn-strong" data-act="nav" data-r="build"><span class="spin"></span><span><b>Building a course</b><span class="s">${a.esc(bj.title)} · ${bj.pct}%. Tap to watch.</span></span></button>` : ''}
+    ${window.KVCourseStore ? window.KVCourseStore.bar() : ''}
     ${shelf('Official courses', 'Made by Knowvia. They work offline and are updated over time.', off, 'No official courses yet.')}
     ${shelf('Your own sources', 'Courses made from your PDFs, links and notes. Kept on this device.', up, `Nothing here yet. Add a PDF, a link, a video or some notes and Amani turns it into a study path with questions and flashcards.`)}
     <div class="row-actions" style="margin-top:-6px"><button class="btn sm primary" data-act="nav" data-r="mysources">${a.ic(a.I.upload, 16, 2)}Add a source</button><button class="btn sm" data-act="nav" data-r="mysources">Manage sources</button></div>

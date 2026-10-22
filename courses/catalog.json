@@ -1,0 +1,60 @@
+{
+ "updated": "2026-10-22",
+ "courses": [
+  {
+   "id": "copywriting-fundamentals",
+   "title": "Direct-Response Copywriting Fundamentals",
+   "sub": "Learn to write words that make people act, and finish your first practice piece.",
+   "level": "Beginner",
+   "hours": 2.5,
+   "lessons": 5,
+   "version": "0.1.0",
+   "bytes": 38777,
+   "file": "courses/copywriting-fundamentals.json",
+   "status": "ready",
+   "notes": []
+  },
+  {
+   "id": "prompt-engineering",
+   "title": "Prompt Engineering: Beginner to Pro",
+   "sub": "Get dependable results from any AI, then turn it into a skill people pay for.",
+   "level": "Beginner to advanced",
+   "status": "soon"
+  },
+  {
+   "id": "excel-zero-to-confident",
+   "title": "Excel from Zero to Confident",
+   "sub": "Formulas, tables and charts you will actually use at work.",
+   "level": "Beginner",
+   "status": "soon"
+  },
+  {
+   "id": "freelancing-clients",
+   "title": "Freelancing: Find and Keep Clients",
+   "sub": "Pick a service, pitch, price and deliver so clients come back.",
+   "level": "Beginner",
+   "status": "soon"
+  },
+  {
+   "id": "project-management",
+   "title": "Project Management: Plan, Lead, Deliver",
+   "sub": "Run projects that finish on time, with the people you have.",
+   "level": "Beginner",
+   "status": "soon"
+  },
+  {
+   "id": "data-analysis-fundamentals",
+   "title": "Data Analysis Fundamentals",
+   "sub": "Ask good questions of data and show what you found.",
+   "level": "Beginner",
+   "status": "soon"
+  },
+  {
+   "id": "social-media-management",
+   "title": "Social Media Management: From Posts to Paying Clients",
+   "sub": "Plan, create and report for brands, and get paid for it.",
+   "level": "Beginner",
+   "status": "soon"
+  }
+ ]
+}
