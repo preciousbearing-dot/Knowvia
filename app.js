@@ -297,7 +297,7 @@ function parseBlocks(body) {
   return blocks;
 }
 function plainText(body) {
-  return body.replace(/^:::\w+.*$/gm, '').replace(/^:::$/gm, '').replace(/\\([*#])/g, '$1').replace(/\*\*/g, '').replace(/\n{3,}/g, '\n\n').trim();
+  return body.replace(/^:::figure[^\n]*\n([\s\S]*?)\n:::[ \t]*$/gm, (m, t) => '\n' + (window.KVFig ? window.KVFig.spoken(t) : '') + '\n').replace(/^:::\w+.*$/gm, '').replace(/^:::$/gm, '').replace(/\\([*#])/g, '$1').replace(/\*\*/g, '').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 /* ---------------- Check cards ---------------- */
@@ -335,6 +335,7 @@ function lessonHtml(l, idx, total) {
         return `<div class="exercise"><p class="lbl">Your turn: ${esc(t)}</p><div class="in">${renderMd(b.text)}</div></div>`;
       }
       case 'check': { const q = qById(b.args.split(/\s+/)[0]); return q ? checkHtml(q) : ''; }
+      case 'figure': return window.KVFig ? window.KVFig.render(b.text) : '';
       default: return renderMd(b.text);
     }
   }).join('');

@@ -1,1 +1,9 @@
-{"version": "0.13.0", "min": "0.0.0", "notes": ["Follow along: the lesson text highlights and scrolls as the audio plays.", "Jump 20 seconds back or forward, or drag the audio bar to any point.", "Fixed: a lesson in another course no longer offers the wrong audio position.", "New Course store: add courses and get updates without reinstalling.", "Request a course and the Knowvia team will build it for you.", "A clearer guide to connecting all three free cloud tutors."]}
+{
+  "version": "0.14.0",
+  "min": "0.0.0",
+  "notes": [
+    "Fixed: audio lessons no longer skip a paragraph that follows a Key idea, Example or Task box.",
+    "Lessons can now show diagrams: process steps, timelines, comparison grids, loops and charts that follow your theme.",
+    "Tap Enlarge on a bigger diagram to see it full screen."
+  ]
+}

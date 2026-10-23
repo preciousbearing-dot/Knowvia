@@ -75,8 +75,9 @@ function speakable(md) {
   let s = String(md || '').replace(/\r/g, '');
   s = s.replace(/\\([*#_`])/g, '$1');
   s = s.replace(/```[\s\S]*?```/g, '\nThere is a code example on screen.\n');
-  s = s.replace(/^:::\s*keyidea.*$/gim, '\nKey idea.').replace(/^:::\s*example(?:\s+title=(.*))?$/gim, (m, t) => '\nExample' + (t ? ': ' + t.trim() : '') + '.').replace(/^:::\s*exercise(?:\s+title=(.*))?$/gim, (m, t) => '\nYour turn' + (t ? ': ' + t.trim() : '') + '.')
-    .replace(/^:::\s*compare.*$/gim, '\nHere is a comparison.').replace(/^:::\s*check.*$/gim, '').replace(/^:::\s*\w+.*$/gim, '').replace(/^:::\s*$/gm, '\n');
+  s = s.replace(/^:::[ \t]*figure[^\n]*\n([\s\S]*?)\n:::[ \t]*$/gim, (m, t) => '\n' + (window.KVFig ? window.KVFig.spoken(t) : '') + '\n');
+  s = s.replace(/^:::[ \t]*keyidea.*$/gim, '\nKey idea.').replace(/^:::[ \t]*example(?:[ \t]+title=(.*))?$/gim, (m, t) => '\nExample' + (t ? ': ' + t.trim() : '') + '.').replace(/^:::[ \t]*exercise(?:[ \t]+title=(.*))?$/gim, (m, t) => '\nYour turn' + (t ? ': ' + t.trim() : '') + '.')
+    .replace(/^:::[ \t]*compare.*$/gim, '\nHere is a comparison.').replace(/^:::[ \t]*check.*$/gim, '').replace(/^:::[ \t]*\w+.*$/gim, '').replace(/^:::[ \t]*$/gm, '\n');
   s = s.replace(/^\s*(weak|strong|note)\s*:\s*/gim, (m, k) => ({ weak: 'The weaker version: ', strong: 'The stronger version: ', note: 'Note: ' })[k.toLowerCase()]);
   s = s.replace(/^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/gm, '');
   s = s.replace(/^\s*\|(.+)\|\s*$/gm, (m, row) => row.split('|').map((c) => c.trim()).filter(Boolean).join(', ') + '.');
