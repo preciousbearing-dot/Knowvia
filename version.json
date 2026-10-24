@@ -1,9 +1,8 @@
 {
-  "version": "0.14.0",
+  "version": "0.15.0",
   "min": "0.0.0",
   "notes": [
-    "Fixed: audio lessons no longer skip a paragraph that follows a Key idea, Example or Task box.",
-    "Lessons can now show diagrams: process steps, timelines, comparison grids, loops and charts that follow your theme.",
-    "Tap Enlarge on a bigger diagram to see it full screen."
+    "New course: Project Management: Plan, Lead, and Deliver. 17 lessons with diagrams, practice questions and flashcards, free in the Course store.",
+    "Chart numbers now show thousands separators, so 400,000 naira is easy to read."
   ]
 }

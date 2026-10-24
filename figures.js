@@ -151,7 +151,7 @@ function bars(f) {
   const vals = f.rows.map((r) => { let l = r.parts[0], hot = false; if (/^!\s*/.test(l)) { hot = true; l = l.replace(/^!\s*/, ''); } const v = num(r.parts[1]); need(l && v >= 0, 'each bar needs a name and a number'); return { l, v, hot }; });
   const max = Math.max(num(f.kv.max) || 0, ...vals.map((x) => x.v)); need(max > 0, 'bars need a value above zero');
   const unit = f.kv.unit ? ' ' + esc(f.kv.unit) : '';
-  return `<div class="fg-bars">${vals.map((x) => `<div class="fg-br"><span class="fg-bl">${inl(x.l)}</span><span class="fg-bt"><i class="fg-bf${x.hot ? ' hot' : ''}" style="width:${pct(x.v / max)}%"></i></span><span class="fg-bv">${esc(String(x.v))}${unit}</span></div>`).join('')}</div>`;
+  return `<div class="fg-bars">${vals.map((x) => `<div class="fg-br"><span class="fg-bl">${inl(x.l)}</span><span class="fg-bt"><i class="fg-bf${x.hot ? ' hot' : ''}" style="width:${pct(x.v / max)}%"></i></span><span class="fg-bv">${esc(Math.abs(x.v) >= 10000 ? x.v.toLocaleString('en-US') : String(x.v))}${unit}</span></div>`).join('')}</div>`;
 }
 
 function versus(f) {

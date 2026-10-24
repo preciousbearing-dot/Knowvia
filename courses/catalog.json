@@ -1,5 +1,5 @@
 {
- "updated": "2026-10-22",
+ "updated": "2026-10-24",
  "courses": [
   {
    "id": "copywriting-fundamentals",
@@ -11,6 +11,19 @@
    "version": "0.1.0",
    "bytes": 38777,
    "file": "courses/copywriting-fundamentals.json",
+   "status": "ready",
+   "notes": []
+  },
+  {
+   "id": "project-management",
+   "title": "Project Management: Plan, Lead, and Deliver",
+   "sub": "Run projects you can plan, track and bring to a clean finish, from your first charter to a plan you can present.",
+   "level": "Beginner",
+   "hours": 10,
+   "lessons": 17,
+   "version": "0.1.0",
+   "bytes": 222030,
+   "file": "courses/project-management.json",
    "status": "ready",
    "notes": []
   },
@@ -32,13 +45,6 @@
    "id": "freelancing-clients",
    "title": "Freelancing: Find and Keep Clients",
    "sub": "Pick a service, pitch, price and deliver so clients come back.",
-   "level": "Beginner",
-   "status": "soon"
-  },
-  {
-   "id": "project-management",
-   "title": "Project Management: Plan, Lead, Deliver",
-   "sub": "Run projects that finish on time, with the people you have.",
    "level": "Beginner",
    "status": "soon"
   },
