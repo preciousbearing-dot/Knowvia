@@ -1,5 +1,5 @@
 {
- "updated": "2026-10-24",
+ "updated": "2026-10-25",
  "courses": [
   {
    "id": "copywriting-fundamentals",
@@ -12,7 +12,22 @@
    "bytes": 38777,
    "file": "courses/copywriting-fundamentals.json",
    "status": "ready",
-   "notes": []
+   "notes": [],
+   "outcome": "Write a clear offer, a strong hook, a persuasive structure and a clean edited draft for a real small business.",
+   "delivery": "bundled",
+   "reviewed": false,
+   "modules": [
+    {
+     "title": "The fundamentals",
+     "lessons": [
+      "What direct-response copy is",
+      "Know the reader",
+      "Offers, big ideas and hooks",
+      "Structure that persuades",
+      "Edit and ship"
+     ]
+    }
+   ]
   },
   {
    "id": "project-management",
@@ -22,10 +37,52 @@
    "hours": 10,
    "lessons": 17,
    "version": "0.1.0",
-   "bytes": 222030,
+   "bytes": 222180,
    "file": "courses/project-management.json",
    "status": "ready",
-   "notes": []
+   "notes": [],
+   "outcome": "Plan, lead and close a real project: write a charter, break down the work, estimate honestly, find the critical path, build a budget and risk register, run the team, control change and present a complete plan.",
+   "delivery": "store",
+   "reviewed": true,
+   "modules": [
+    {
+     "title": "Foundations: projects, goals and people",
+     "lessons": [
+      "What a project is, and what a project manager does",
+      "Life cycles and methods: plan-first, agile and hybrid",
+      "Start right: goals, scope and the project charter",
+      "Stakeholders and the communication plan"
+     ]
+    },
+    {
+     "title": "Planning: scope, time, money and risk",
+     "lessons": [
+      "Break the work down: the work breakdown structure",
+      "Estimating time and effort honestly",
+      "Scheduling: dependencies, the critical path and the Gantt chart",
+      "Budget, cost and resources",
+      "Managing risk before it manages you"
+     ]
+    },
+    {
+     "title": "Leading and delivering the work",
+     "lessons": [
+      "Lead the team: roles, trust and how groups develop",
+      "Running the work: Scrum and Kanban in practice",
+      "Meetings, updates and clear communication",
+      "Track progress and control change",
+      "Conflict, pressure and negotiation"
+     ]
+    },
+    {
+     "title": "Finishing and applying it",
+     "lessons": [
+      "Quality, handover and closing well",
+      "Tools, templates and turning the skill into work",
+      "Capstone: plan a real project from start to finish"
+     ]
+    }
+   ]
   },
   {
    "id": "prompt-engineering",
