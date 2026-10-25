@@ -74,7 +74,7 @@ function card(c) {
   else if (s === 'update') { tag = `<span class="st-tag up">Update ready</span>`; notes = (c.notes && c.notes.length) ? `<ul class="st-notes">${c.notes.map((n) => `<li>${a.esc(n)}</li>`).join('')}</ul>` : ''; act = `<button class="btn sm primary" data-act="st-get" data-id="${a.esc(c.id)}">${busy ? 'Updating…' : 'Update'}</button>`; }
   else if (s === 'have') { tag = `<span class="st-tag ok">On your shelf</span>`; act = `<button class="btn sm" data-act="openpack" data-id="${a.esc(c.id)}">Open</button>`; }
   else tag = `<span class="st-tag soon">Coming soon</span>`;
-  const rv = c.reviewed && s !== 'soon' ? `<span class="st-tag rv">Reviewed</span>` : '';
+  const qi = a.qualityInfo({ status: c.status, riskLevel: c.risk }), rv = qi.tag && s !== 'soon' ? `<span class="st-tag rv">Reviewed</span>` : '';
   const more = s !== 'soon' && (c.outcome || c.modules) ? `<button class="btn sm" data-act="st-open" data-id="${a.esc(c.id)}">Details</button>` : '';
   return `<article class="st-card pn-strong ${s}"><div class="st-top"><b>${a.esc(c.title)}</b><span class="st-tags">${rv}${tag}</span></div><p class="help">${a.esc(c.sub || '')}</p><p class="meta">${a.esc(meta)}${p && s === 'update' ? ' · you have v' + a.esc(p.version) : ''}</p>${notes}${act || more ? `<div class="row-actions">${more}${act}</div>` : ''}</article>`;
 }
@@ -100,7 +100,7 @@ REG.screens.store = screen; REG.names.store = 'Course store';
 const prevAfter = REG.hooks.afterScreen;
 REG.hooks.afterScreen = (name) => { if (prevAfter) prevAfter(name); if (name === 'store') load(); };
 function detailHtml(c) {
-  const a = A(), s = status(c), p = mine(c.id), busy = ST.busy[c.id];
+  const a = A(), qi = a.qualityInfo({ status: c.status, riskLevel: c.risk }), s = status(c), p = mine(c.id), busy = ST.busy[c.id];
   const meta = [c.level, c.lessons ? c.lessons + ' lessons' : '', c.hours ? 'about ' + c.hours + ' h' : '', c.bytes && s !== 'have' ? size(c.bytes) : ''].filter(Boolean).join(' · ');
   const mods = (c.modules || []).map((m, i) => `<div class="st-mod"><b>${i + 1}. ${a.esc(m.title)}</b><ul>${(m.lessons || []).map((l) => `<li>${a.esc(l)}</li>`).join('')}</ul></div>`).join('');
   let act;
@@ -108,8 +108,8 @@ function detailHtml(c) {
   else if (s === 'update') act = `<button class="btn primary" data-act="st-get" data-id="${a.esc(c.id)}">${busy ? 'Updating…' : 'Update'}</button>`;
   else act = `<button class="btn primary" data-act="st-open-course" data-id="${a.esc(c.id)}">Open course</button>`;
   return `<div class="ov-card pn-strong st-dcard" data-act="st-keep"><div class="fig-zh"><b>${a.esc(c.title)}</b><button type="button" class="btn sm" data-act="st-close">Close</button></div>
-    <div class="st-db"><p class="meta">${a.esc(meta)}${p && s === 'update' ? ' · you have v' + a.esc(p.version) : ''}${c.reviewed ? ' · <span class="st-tag rv">Reviewed</span>' : ''}</p>
-    <p class="lede">${a.esc(c.sub || '')}</p>${c.outcome ? `<h3>What you will be able to do</h3><p>${a.esc(c.outcome)}</p>` : ''}
+    <div class="st-db"><p class="meta">${a.esc(meta)}${p && s === 'update' ? ' · you have v' + a.esc(p.version) : ''}${qi.tag ? ' · <span class="st-tag rv">Reviewed</span>' : ''}</p>
+    <p class="lede">${a.esc(c.sub || '')}</p><p class="meta st-q">${a.esc(qi.line)}${qi.riskNote ? ' ' + a.esc(qi.riskNote) : ''}</p>${c.outcome ? `<h3>What you will be able to do</h3><p>${a.esc(c.outcome)}</p>` : ''}
     ${mods ? `<h3>Inside the course</h3>${mods}` : ''}</div><div class="row-actions">${act}</div></div>`;
 }
 function openDetail(id) {

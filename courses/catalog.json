@@ -9,12 +9,13 @@
    "hours": 2.5,
    "lessons": 5,
    "version": "0.1.0",
-   "bytes": 38777,
+   "bytes": 38833,
    "file": "courses/copywriting-fundamentals.json",
-   "status": "ready",
+   "status": "validated",
    "notes": [],
    "outcome": "Write a clear offer, a strong hook, a persuasive structure and a clean edited draft for a real small business.",
    "delivery": "bundled",
+   "risk": "low",
    "reviewed": false,
    "modules": [
     {
@@ -37,13 +38,14 @@
    "hours": 10,
    "lessons": 17,
    "version": "0.1.0",
-   "bytes": 222180,
+   "bytes": 222227,
    "file": "courses/project-management.json",
-   "status": "ready",
+   "status": "ai-reviewed",
    "notes": [],
    "outcome": "Plan, lead and close a real project: write a charter, break down the work, estimate honestly, find the critical path, build a budget and risk register, run the team, control change and present a complete plan.",
    "delivery": "store",
-   "reviewed": true,
+   "risk": "moderate",
+   "reviewed": false,
    "modules": [
     {
      "title": "Foundations: projects, goals and people",

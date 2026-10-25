@@ -223,6 +223,24 @@ function cloudListHtml() {
 }
 function refreshCloudSlots() { $$('.clouds-slot').forEach((el) => { const f = document.activeElement; const keep = f && el.contains(f) && f.id; const v = keep ? f.value : null; el.innerHTML = cloudListHtml(); if (keep) { const n = document.getElementById(keep); if (n) { n.value = v; n.focus(); } } }); }
 
+/* Honest review status. Mirrors tools/kvpack.py in the workshop (tests/t_status.py checks they agree). Only a person's review earns the Reviewed tag. */
+const QSTAT = ['draft', 'validated', 'ai-reviewed', 'human-reviewed', 'released'];
+const QLINE = {
+  draft: 'Draft. This course has not been reviewed yet.',
+  validated: 'This course passed Knowvia\'s automatic checks. It has not yet had a separate review.',
+  'ai-reviewed': 'Checked by automatic tests and a separate AI review. A person has not reviewed it yet.',
+  'human-reviewed': 'Reviewed by a person.',
+  released: 'Reviewed by a person and approved for release.'
+};
+function qualityInfo(q) {
+  q = q || {};
+  const status = QSTAT.includes(q.status) ? q.status : q.humanReviewed === true ? 'human-reviewed' : q.reviewed === true ? 'ai-reviewed' : 'draft';
+  const risk = ['low', 'moderate', 'high'].includes(q.riskLevel) ? q.riskLevel : 'moderate';
+  const tag = status === 'human-reviewed' || status === 'released';
+  const riskNote = risk === 'high' && !tag ? 'This is a high-stakes subject. Use the course to learn, and check decisions with a qualified professional.' : risk === 'moderate' ? 'Check anything you rely on against current official sources.' : '';
+  return { status, risk, tag, line: QLINE[status], riskNote };
+}
+
 /* ---------------- Markdown ---------------- */
 function inline(s) {
   const hold = [];
@@ -672,7 +690,7 @@ function screenLearn() {
     return `<button class="lrow raised" data-act="lesson" data-id="${l.id}"><span class="lnum ${st === 'done' ? 'done' : 'inset'}">${st === 'done' ? ic(I.check, 18, 2.4) : i + 1}</span>
       <span class="grow"><p class="t">${esc(l.title)}</p><p class="s">${l.minutes} min${st === 'started' ? ' · In progress' : st === 'done' ? ' · Done' : ''}</p></span>${ic(I.chev, 18, 2)}</button>`;
   }).join('');
-  const q = p.quality || {};
+  const q = p.quality || {}, qi = qualityInfo(q);
   return `<div class="page">
     <section class="hero pn-strong"><p class="eyebrow">${started ? 'Continue where you left off' : 'Start here'}</p>
       <h2>${esc(nl.title)}</h2><p>${esc(nl.subtitle)}</p>
@@ -683,7 +701,7 @@ function screenLearn() {
     <h2 class="sec-title">${esc(p.title)}</h2>
     <p class="meta" style="margin-top:-12px">${esc(p.outcome)}</p>
     <div class="lessons">${rows}</div>
-    <div class="note-box inset"><b>Pack status.</b> ${q.humanReviewed ? 'Reviewed by a person.' : 'Draft, not yet reviewed by a person.'} Facts were ${q.factChecked ? 'checked in part' : 'not yet checked'}. Examples marked invented are for practice.
+    <div class="note-box inset"><b>Review status.</b> ${esc(qi.line)} ${qi.riskNote ? esc(qi.riskNote) + ' ' : ''}Facts were ${q.factChecked ? 'checked in part' : 'not yet checked'}. Examples marked invented are for practice.
       <button class="btn sm" style="margin-left:8px" data-act="nav" data-r="sources">See sources</button></div></div>`;
 }
 function empty(t, d, btn) { return `<div class="page"><div class="empty pn-strong"><h3>${esc(t)}</h3><p>${esc(d)}</p>${btn || ''}</div></div>`; }
@@ -1691,7 +1709,7 @@ function returnSplash(mode) {
 
 window.KVApp = {
   get S() { return S; }, save, saveNow, $, $$, esc, ic, I, go, goBack, toast, get route() { return route; }, renderScreen, renderTutor, renderTop, PACKS, prog, lessons, pack, lessonById,
-  PROV, PROV_TOP, PROV_ALT, cloudCfg, cloudFetch, localModelList, activeModelName, tutorReady, showOv, studio, get DESK() { return DESK; }, inline, renderMd, parseBlocks, plainText,
+  qualityInfo, PROV, PROV_TOP, PROV_ALT, cloudCfg, cloudFetch, localModelList, activeModelName, tutorReady, showOv, studio, get DESK() { return DESK; }, inline, renderMd, parseBlocks, plainText,
   askTutor, chat, clearErrors, afterTutorChange, bestCloud, setLocalModels(l) { ollamaModels = (l || []).slice(); }, isNative, llm, switchToOffline, applyTheme, resolvedTheme, sleep, shuffle, get version() { return APP_VERSION; }, get busy() { return busy; },
   openTutor() { tutorOpen = true; renderTop(); renderTutor(); },
   openProvider(id) { cloudOpen = id; go('me'); setTimeout(() => { const e = document.querySelector('[data-p="' + id + '"]'); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'center' }); }, 350); },
