@@ -243,16 +243,29 @@ function qualityInfo(q) {
 
 /* ---------------- Markdown ---------------- */
 function inline(s) {
-  const hold = [];
-  s = String(s).replace(/\\([\\`*_{}\[\]()#+\-.!|<>~$])/g, (m, c) => { hold.push(c); return '\u0000' + (hold.length - 1) + '\u0000'; });
+  const hold = [], codes = [];
+  /* code spans first, so a formula such as `=A1*B1*C1` is never touched by bold or italic */
+  s = String(s).replace(/`([^`\n]+)`/g, (m, c) => { codes.push(c); return '\u0001' + (codes.length - 1) + '\u0001'; });
+  s = s.replace(/\\([\\`*_{}\[\]()#+\-.!|<>~$])/g, (m, c) => { hold.push(c); return '\u0000' + (hold.length - 1) + '\u0000'; });
   s = esc(s);
-  s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
   s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
   s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)]*[^\s<).,;])/g, '$1<a href="$2" target="_blank" rel="noopener noreferrer">$2</a>');
-  s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-  s = s.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+  /* Bold and italic follow the usual flanking rule: the opening star must not touch a letter, digit, ) ] or $ on its left,
+     must be followed by a non-space, and the closing star must be preceded by a non-space and not touch a letter or digit.
+     So =A1*B1*C1, 2*3*4, 3 * 4 * 5 and x**2 stay as written, while *like this* and **this** still work. */
+  s = s.replace(/(^|[^\w*)\]$])\*\*\*([^\s*](?:[^*]*[^\s*])?)\*\*\*(?![\w*])/g, '$1<strong><em>$2</em></strong>');
+  s = s.replace(/(^|[^\w*)\]$])\*\*([^\s*](?:[^*]*[^\s*])?)\*\*(?![\w*])/g, '$1<strong>$2</strong>');
+  s = s.replace(/(^|[^\w*)\]$])\*([^\s*](?:[^*\n]*[^\s*])?)\*(?![\w*])/g, '$1<em>$2</em>');
+  s = s.replace(/\u0001(\d+)\u0001/g, (m, i) => '<code>' + esc(codes[+i]) + '</code>');
   s = s.replace(/\u0000(\d+)\u0000/g, (m, i) => esc(hold[+i]));
   return s;
+}
+/* A fenced code block: language label, indentation kept exactly, a Copy button. The code is shown, never run. */
+const CODE_LABEL = { python: 'Python', py: 'Python', javascript: 'JavaScript', js: 'JavaScript', typescript: 'TypeScript', ts: 'TypeScript', sql: 'SQL', html: 'HTML', css: 'CSS', json: 'JSON', bash: 'Bash', sh: 'Shell', shell: 'Shell', powershell: 'PowerShell', excel: 'Excel formula', formula: 'Formula', sheets: 'Google Sheets formula', vba: 'VBA', r: 'R', java: 'Java', c: 'C', cpp: 'C++', csharp: 'C#', cs: 'C#', php: 'PHP', go: 'Go', text: 'Text', txt: 'Text', output: 'Output', pseudocode: 'Pseudocode', csv: 'CSV', yaml: 'YAML', md: 'Markdown' };
+function codeHtml(lang, code) {
+  const label = CODE_LABEL[lang] || (lang && lang.length <= 14 ? lang.toUpperCase() : 'Code');
+  const out = lang === 'output';
+  return `<figure class="code${out ? ' out' : ''} nofollow" data-lang="${esc(lang)}"><figcaption><span class="code-lang">${esc(label)}</span><button type="button" class="btn sm code-copy" data-act="copy-code" aria-label="Copy this ${esc(label)} code">Copy</button></figcaption><pre tabindex="0" aria-label="${esc(label)} code example"><code>${esc(code)}</code></pre></figure>`;
 }
 const botMd = (t) => { const h = renderMd(t); return REG.hooks.cite ? REG.hooks.cite(h) : h; };
 function renderMd(text) {
@@ -264,6 +277,13 @@ function renderMd(text) {
     const l = lines[i];
     if (isBlank(l)) { i++; continue; }
     let m;
+    if ((m = l.match(/^(\s*)```\s*([A-Za-z0-9_+#.-]*)\s*$/))) {
+      const ind = m[1].length, lang = m[2].toLowerCase(), code = []; i++;
+      while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) { code.push(ind ? lines[i].replace(new RegExp('^ {0,' + ind + '}'), '') : lines[i]); i++; }
+      if (i < lines.length) i++;
+      while (code.length && !code[code.length - 1].trim()) code.pop();
+      out.push(codeHtml(lang, code.join('\n'))); continue;
+    }
     if ((m = l.match(/^(#{1,3})\s+(.*)$/))) { const n = m[1].length; out.push(`<h${n}>${inline(m[2])}</h${n}>`); i++; continue; }
     if (/^\s*\|/.test(l) && i + 1 < lines.length && /^\s*\|?\s*:?-{2,}/.test(lines[i + 1])) {
       const cells = (r) => r.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
@@ -290,7 +310,7 @@ function renderMd(text) {
       out.push(`<blockquote class="inset">${inline(q.join(' '))}</blockquote>`); continue;
     }
     const para = [];
-    while (i < lines.length && !isBlank(lines[i]) && !/^(#{1,3}\s|\s*\|)/.test(lines[i]) && !(/^\s*[-*]\s+/.test(lines[i]) && !/^\s*\*\*/.test(lines[i])) && !/^\s*\d+[.)]\s+/.test(lines[i]) && !/^>\s?/.test(lines[i])) { para.push(lines[i]); i++; }
+    while (i < lines.length && !isBlank(lines[i]) && !/^(#{1,3}\s|\s*\||\s*```)/.test(lines[i]) && !(/^\s*[-*]\s+/.test(lines[i]) && !/^\s*\*\*/.test(lines[i])) && !/^\s*\d+[.)]\s+/.test(lines[i]) && !/^>\s?/.test(lines[i])) { para.push(lines[i]); i++; }
     if (!para.length) { para.push(lines[i]); i++; }
     out.push(`<p>${inline(para.join(' '))}</p>`);
   }
@@ -1658,6 +1678,11 @@ document.addEventListener('click', (ev) => {
     done();
   }
 });
+REG.acts['copy-code'] = (t) => {
+  const f = t.closest('figure.code'), c = f && f.querySelector('code'); if (!c) return; const txt = c.textContent;
+  const ok = () => { toast('Code copied'); t.textContent = 'Copied'; setTimeout(() => { t.textContent = 'Copy'; }, 1600); };
+  try { navigator.clipboard.writeText(txt).then(ok, () => { fallbackCopy(txt); ok(); }); } catch (e) { fallbackCopy(txt); ok(); }
+};
 function fallbackCopy(t) { const x = document.createElement('textarea'); x.value = t; x.style.cssText = 'position:fixed;opacity:0'; document.body.appendChild(x); x.select(); try { document.execCommand('copy'); } catch (e) {} x.remove(); }
 document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && $('#selpop')) { selHide(); } });
 
