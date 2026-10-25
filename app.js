@@ -903,15 +903,82 @@ let busy = false, ctrl = null, ollamaInfo = null, mdlOpen = false, ollamaModels 
 function chatKey() { return pack().id + ':' + (route.name === 'lesson' ? route.id : 'pack'); }
 const tutorRoute = () => route.name === 'lesson' || route.name === 'home';
 function chat() { const k = chatKey(); if (!S.chats[k]) S.chats[k] = []; return S.chats[k]; }
+/* How much of the lesson Amani can read, in characters (about 3 per token, which is safe for text with code).
+   Cloud models take the whole lesson. The offline engine has a small window (4096 tokens on a phone with 6 GB or more, 3072 below that,
+   and we now ask Ollama for 4096 on a computer) and prompt reading is slow, so it gets a shorter, carefully chosen version.
+   The phone numbers stay close to the old 1500 on purpose: a longer prompt makes every reply slower on a phone, and that was measured by the owner at minutes per reply.
+   These numbers are estimates from the window sizes, not measurements of speed. */
+function tutorBudget() {
+  if (S.tutor.brain !== 'local') return { chars: 12000, q: 1800, kind: 'cloud' };
+  if (isNative()) { const sp = (window.KVDevice && window.KVDevice.state && window.KVDevice.state.specs) || {}, ram = sp.ramGb || 6; return { chars: ram >= 8 ? 2000 : ram >= 6 ? 1800 : 1500, q: 350, kind: 'phone' }; }
+  return { chars: 3200, q: 600, kind: 'desktop' };
+}
+const clip = (t, n) => { t = String(t || '').trim(); if (t.length <= n) return t; const cut = t.slice(0, n), k = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('? '), cut.lastIndexOf('! ')); return (k > n * 0.5 ? cut.slice(0, k + 1) : cut.replace(/\s+\S*$/, '')) + ' [...]'; };
+/* Reads the lesson in a fixed order of importance. Outcomes, key ideas, exercises, figure captions and the closing recap are never dropped.
+   Examples and comparisons are shortened next, and ordinary paragraphs last. Anything shortened is marked, and the tutor is told. */
+function lessonContext(l, budget) {
+  const body = String(l.body || '').replace(/\r/g, ''), blocks = parseBlocks(body), items = [];
+  const lastH = body.lastIndexOf('\n## '), tailStart = lastH < 0 ? body.length : lastH;
+  let sec = '';
+  blocks.forEach((b) => {
+    if (b.type === 'md') {
+      b.text.split(/\n\s*\n/).forEach((para) => {
+        const p = para.trim(); if (!p) return;
+        const h = p.match(/^#{1,3}\s+(.*)$/m); if (h && /^#{1,3}\s/.test(p)) sec = h[1].replace(/\*+/g, '');
+        const inTail = body.indexOf(p) >= tailStart;
+        const hd = /^#{1,3}\s/.test(p); items.push({ pri: hd ? 0 : inTail && p.length < 1200 ? 0 : 2, hd, tail: !hd && inTail, sec, text: plainText(p) });
+      });
+    } else if (b.type === 'keyidea') items.push({ pri: 0, sec, text: 'Key idea: ' + plainText(b.text) });
+    else if (b.type === 'exercise') items.push({ pri: 0, sec, text: 'Exercise' + ((b.args.match(/title=(.*)$/) || [])[1] ? ' (' + b.args.match(/title=(.*)$/)[1] + ')' : '') + ': ' + clip(plainText(b.text), 900) });
+    else if (b.type === 'figure') items.push({ pri: 0, sec, text: window.KVFig ? window.KVFig.spoken(b.text) : '' });
+    else if (b.type === 'example') items.push({ pri: 1, sec, text: 'Example' + ((b.args.match(/title=(.*)$/) || [])[1] ? ' (' + b.args.match(/title=(.*)$/)[1] + ')' : '') + ': ' + plainText(b.text) });
+    else if (b.type === 'compare') items.push({ pri: 1, sec, text: 'Comparison: ' + plainText(b.text.replace(/^weak:/im, 'Weaker: ').replace(/^strong:/im, 'Stronger: ').replace(/^note:/im, 'Note: ')) });
+  });
+  const head = l.title + '\n' + (l.subtitle || '') + ((l.outcomes || []).length ? '\nBy the end the learner can: ' + l.outcomes.map((o) => plainText(o)).join('; ') + '.' : '') + '\n\n';
+  const LEVELS = [[1e9, 1e9], [420, 900], [240, 500], [140, 260], [0, 0]];
+  for (let lv = 0; lv < LEVELS.length; lv++) {
+    const [p2, p1] = LEVELS[lv], seen = {};
+    const parts = items.map((it) => {
+      if (it.pri === 0) return lv === 4 && !it.hd ? clip(it.text, 280) : it.tail && lv >= 3 ? clip(it.text, lv === 3 ? 420 : 260) : it.text;
+      const cap = it.pri === 2 ? p2 : p1;
+      if (cap === 0) { if (it.pri === 2 && !seen[it.sec]) { seen[it.sec] = 1; return clip(it.text, 160); } return ''; }
+      return clip(it.text, cap);
+    }).filter(Boolean);
+    const joined = parts.join('\n\n'), cut = lv > 0;
+    const note = cut ? '(This is a SHORT VERSION of the lesson. Some parts are shortened or left out and marked [...]. If the learner asks about something that looks cut, say you only have the short version here and answer from what you can see.)\n\n' : '';
+    const text = note + head + joined;
+    if (text.length <= budget || lv === LEVELS.length - 1) return { text: text.length > budget * 1.3 ? text.slice(0, Math.round(budget * 0.45)) + '\n[...]\n' + text.slice(-Math.round(budget * 0.8)) : text, shortened: cut, level: lv };
+  }
+}
+/* Questions in the lesson. Unanswered ones are listed WITHOUT their answers, so Amani cannot give them away. Answered ones are already on the learner's screen. */
+function lessonQuestions(l, budget) {
+  const p = pack(), pr = prog(), inline = parseBlocks(l.body).filter((b) => b.type === 'check').map((b) => qById(b.args.split(/\s+/)[0])).filter(Boolean);
+  const rest = (p.quiz || []).filter((q) => q.lesson === l.id && !inline.includes(q));
+  const out = []; let used = 0;
+  inline.concat(rest).forEach((q) => {
+    const done = pr.answers[q.id] !== undefined, L = (id) => String(id).toUpperCase();
+    const opts = q.options.map((o) => L(o.id) + ') ' + clip(plainText(o.text), 90)).join('  ');
+    const line = done ? 'Question "' + clip(plainText(q.prompt), 160) + '" ' + opts + '. The learner answered ' + L(pr.answers[q.id]) + '. The correct answer is ' + L(q.answer) + '. Why: ' + clip(plainText(q.explanation), 200)
+      : 'Question (not answered yet, answer withheld): "' + clip(plainText(q.prompt), 160) + '" ' + opts;
+    if (used + line.length > budget || out.length >= 6) return;
+    used += line.length; out.push(line);
+  });
+  return out;
+}
 function tutorContext() {
   if (route.name === 'lesson') {
-    const l = lessonById(route.id), ls = lessons();
+    const l = lessonById(route.id), ls = lessons(), bud = tutorBudget();
     const terms = (l.terms && l.terms.length ? l.terms : Array.from(new Set((String(l.body || '').match(/\*\*([^*\n]{2,40})\*\*/g) || []).map((x) => x.replace(/\*/g, '').trim())))).slice(0, 14);
-    return { title: l.title, n: ls.findIndex((x) => x.id === l.id) + 1, terms, text: (l.title + '\n' + l.subtitle + '\n\n' + plainText(l.body)).slice(0, 7000) };
+    const lc = lessonContext(l, bud.chars), qs = lessonQuestions(l, bud.q);
+    return { title: l.title, n: ls.findIndex((x) => x.id === l.id) + 1, terms, shortened: lc.shortened, questions: qs, text: lc.text + (qs.length ? '\n\nQUESTIONS IN THIS LESSON:\n' + qs.map((x, i) => (i + 1) + '. ' + x).join('\n') : '') };
   }
   if (route.name === 'home' && pack()) {
-    const p = pack(), ls = lessons();
-    return { title: p.title, n: 0, home: true, text: ('COURSE: ' + p.title + '\n' + (p.outcome || '') + '\nLESSONS:\n' + ls.map((l, i) => (i + 1) + '. ' + l.title + ': ' + l.subtitle).join('\n')).slice(0, 5000) };
+    const p = pack(), ls = lessons(), bud = tutorBudget().chars;
+    let lines = ls.map((l, i) => (i + 1) + '. ' + l.title + ': ' + l.subtitle), head = 'COURSE: ' + p.title + '\n' + (p.outcome || '') + '\nLESSONS:\n', short = false;
+    if ((head + lines.join('\n')).length > bud) { lines = ls.map((l, i) => (i + 1) + '. ' + l.title); short = true; }
+    let text = head + lines.join('\n');
+    if (text.length > bud) { let k = lines.length; while (k > 1 && (head + lines.slice(0, k).join('\n')).length > bud - 60) k--; text = head + lines.slice(0, k).join('\n') + '\n[... ' + (lines.length - k) + ' more lessons not shown]'; short = true; }
+    return { title: p.title, n: 0, home: true, shortened: short, text };
   }
   return null;
 }
@@ -1056,14 +1123,14 @@ function renderTutor() {
 /* Offline models are small and slow, so they get a short, plain prompt: no personality, a trimmed lesson, short answers. Your Amani style comes back on a cloud model. */
 function leanPrompt(ctx) {
   const lesson = ctx.home ? 'The learner is on the home screen of a course. Course outline:\n' : 'The learner is reading this lesson. Answer from it. If the answer is not in it, say so in one short sentence, then help briefly.\nLESSON:\n';
-  return 'You are Amani, a friendly study helper in the Knowvia app. Answer in plain, simple English in under 120 words. Be accurate and never invent facts. If asked to quiz, ask ONE question with options A, B and C. If the learner says "Continue", carry on from where your last answer stopped.\n' + lesson + String(ctx.text || '').slice(0, 1500);
+  return 'You are Amani, a friendly study helper in the Knowvia app. Answer in plain, simple English in under 120 words. Be accurate and never invent facts, sources, links or page numbers. If asked for a source, say you only know what this lesson says. For a lesson question that is not answered yet, never say which option is right: give a hint and ask one guiding question. If asked to quiz, ask ONE question with options A, B and C. If the learner says "Continue", carry on from where your last answer stopped.\n' + lesson + String(ctx.text || '');
 }
 function systemPrompt(ctx) {
   if (S.tutor.brain === 'local') return leanPrompt(ctx);
   const who = 'You are Amani, a study companion inside the learning app Knowvia. ';
   const persona = REG.hooks.persona ? REG.hooks.persona(ctx) : 'Be warm and patient. ';
   const earlier = 'Earlier replies in this chat may have been written by a different model or in a different voice. From now on, always speak as the character above. ';
-  const rules = 'Keep explanations easy to follow. The language, tone and length rules in YOUR CHARACTER above come first. Never invent facts, statistics or sources. Examples in the lesson marked as invented are for practice only. When asked to quiz, ask ONE question with options A, B and C and wait for the reply.\n' +
+  const rules = 'Keep explanations easy to follow. The language, tone and length rules in YOUR CHARACTER above come first. Never invent facts, statistics or sources. Examples in the lesson marked as invented are for practice only. When asked to quiz, ask ONE question with options A, B and C and wait for the reply. SOURCES: never invent a source, page number, link, book, study or quote. Name a source only if it appears in the text you were given. If the learner asks for a source or citation, say the course lists its sources on its Sources page, give only what the text itself names, and otherwise say you do not have one. QUESTIONS AND HINTS: lesson questions that are not yet answered are listed without their answers on purpose. If the learner asks for help with one, never say which option is correct. Give a hint first: point to the part of the lesson it tests and ask one guiding question. If they ask again, give a stronger hint. If they say they give up, walk through the reasoning step by step from the lesson and let them choose. A question they have already answered can be discussed fully.\n' +
     'After your answer, add ONE final line in exactly this form: <<next: first idea | second idea | third idea>>. These are things the learner might tap next, written in the learner\'s voice, under 8 words each, and specific to what you just said (a follow-up question, a harder example, or a request to be quizzed). Include a quiz request in most replies. If you just asked a quiz question, give the answer options instead, for example <<next: A | B | C>>. Never mention or explain this line.\n\n';
   if (ctx.home) return who + persona + earlier + 'The learner is on the home screen. They may ask about the course below or about how to study. Answer using the course. If something is not in the course, say so briefly and help from general knowledge, labelled as general knowledge. ' + rules + ctx.text;
   return who + persona + earlier + 'The learner is reading the lesson below. Answer using the lesson. If the answer is not in the lesson, say so in one short sentence, then help from general knowledge and label it as general knowledge. ' + rules +
@@ -1172,7 +1239,7 @@ async function streamOllama(messages, onChunk, signal) {
     if (info.models.length) { t.model = info.models[0]; save(); } else throw new Error('No model installed');
   }
   const r = await fetch(t.url.replace(/\/$/, '') + '/api/chat', { method: 'POST', signal, headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: t.model, messages, stream: true, options: { temperature: 0.3, num_predict: isNative() ? 240 : 520 } }) });
+    body: JSON.stringify({ model: t.model, messages, stream: true, options: { temperature: 0.3, num_predict: isNative() ? 240 : 520, num_ctx: 4096 } }) });
   if (!r.ok) throw new Error('HTTP ' + r.status);
   lastCut = false;
   const rd = r.body.getReader(), dec = new TextDecoder();
@@ -1734,7 +1801,7 @@ function returnSplash(mode) {
 
 window.KVApp = {
   get S() { return S; }, save, saveNow, $, $$, esc, ic, I, go, goBack, toast, get route() { return route; }, renderScreen, renderTutor, renderTop, PACKS, prog, lessons, pack, lessonById,
-  qualityInfo, PROV, PROV_TOP, PROV_ALT, cloudCfg, cloudFetch, localModelList, activeModelName, tutorReady, showOv, studio, get DESK() { return DESK; }, inline, renderMd, parseBlocks, plainText,
+  qualityInfo, PROV, PROV_TOP, PROV_ALT, cloudCfg, cloudFetch, localModelList, activeModelName, tutorReady, tutorBudget, lessonContext, lessonQuestions, tutorContext, systemPrompt, showOv, studio, get DESK() { return DESK; }, inline, renderMd, parseBlocks, plainText,
   askTutor, chat, clearErrors, afterTutorChange, bestCloud, setLocalModels(l) { ollamaModels = (l || []).slice(); }, isNative, llm, switchToOffline, applyTheme, resolvedTheme, sleep, shuffle, get version() { return APP_VERSION; }, get busy() { return busy; },
   openTutor() { tutorOpen = true; renderTop(); renderTutor(); },
   openProvider(id) { cloudOpen = id; go('me'); setTimeout(() => { const e = document.querySelector('[data-p="' + id + '"]'); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'center' }); }, 350); },
