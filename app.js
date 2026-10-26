@@ -246,6 +246,12 @@ function inline(s) {
   const hold = [], codes = [];
   /* code spans first, so a formula such as `=A1*B1*C1` is never touched by bold or italic */
   s = String(s).replace(/`([^`\n]+)`/g, (m, c) => { codes.push(c); return '\u0001' + (codes.length - 1) + '\u0001'; });
+  /* formulas next, before backslashes are read as escapes, so \frac, \\ and \( inside maths are left alone */
+  const maths = [];
+  if (window.KVMath && /[$\\]/.test(s)) {
+    const found = window.KVMath.scan(s);
+    for (let k = found.length - 1; k >= 0; k--) { const f = found[k]; maths[k] = f; s = s.slice(0, f.a) + '\u0002' + k + '\u0002' + s.slice(f.b); }
+  }
   s = s.replace(/\\([\\`*_{}\[\]()#+\-.!|<>~$])/g, (m, c) => { hold.push(c); return '\u0000' + (hold.length - 1) + '\u0000'; });
   s = esc(s);
   s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
@@ -258,6 +264,7 @@ function inline(s) {
   s = s.replace(/(^|[^\w*)\]$])\*([^\s*](?:[^*\n]*[^\s*])?)\*(?![\w*])/g, '$1<em>$2</em>');
   s = s.replace(/\u0001(\d+)\u0001/g, (m, i) => '<code>' + esc(codes[+i]) + '</code>');
   s = s.replace(/\u0000(\d+)\u0000/g, (m, i) => esc(hold[+i]));
+  s = s.replace(/\u0002(\d+)\u0002/g, (m, i) => window.KVMath.html(maths[+i].tex, maths[+i].display));
   return s;
 }
 /* A fenced code block: language label, indentation kept exactly, a Copy button. The code is shown, never run. */
@@ -266,6 +273,38 @@ function codeHtml(lang, code) {
   const label = CODE_LABEL[lang] || (lang && lang.length <= 14 ? lang.toUpperCase() : 'Code');
   const out = lang === 'output';
   return `<figure class="code${out ? ' out' : ''} nofollow" data-lang="${esc(lang)}"><figcaption><span class="code-lang">${esc(label)}</span><button type="button" class="btn sm code-copy" data-act="copy-code" aria-label="Copy this ${esc(label)} code">Copy</button></figcaption><pre tabindex="0" aria-label="${esc(label)} code example"><code>${esc(code)}</code></pre></figure>`;
+}
+/* Lists: bullets and numbers, nested by indentation (two spaces or a tab per level, four levels). A blank line ends the list.
+   An indented line straight after an item continues that item. A change of marker at the same level starts a new list. */
+const LIST_RE = /^(\s*)([-*]|\d+[.)])\s+(.*)$/;
+const isListLine = (l) => LIST_RE.test(l) && !/^\s*\*\*/.test(l);
+function listBlock(lines, i) {
+  const items = [];
+  while (i < lines.length) {
+    const raw = lines[i].replace(/^\t+/, (t) => '    '.repeat(t.length));
+    if (isListLine(raw)) {
+      const m = raw.match(LIST_RE);
+      items.push({ ind: m[1].length, type: /^\d/.test(m[2]) ? 'ol' : 'ul', num: parseInt(m[2], 10), text: m[3] });
+    } else if (items.length && /^\s{2,}\S/.test(raw) && !/^\s*```/.test(raw) && !/^\s*\|/.test(raw)) {
+      items[items.length - 1].text += ' ' + raw.trim();
+    } else break;
+    i++;
+  }
+  const root = [], stack = [];
+  const mk = (it) => ({ type: it.type, start: it.type === 'ol' && it.num !== 1 ? it.num : 0, ind: it.ind, items: [] });
+  for (const it of items) {
+    while (stack.length && stack[stack.length - 1].ind > it.ind) stack.pop();
+    let top = stack[stack.length - 1];
+    if (top && top.ind === it.ind && top.type !== it.type) { stack.pop(); top = stack[stack.length - 1]; var fresh = true; } else fresh = false;
+    const node = { text: it.text, kids: [] };
+    if (top && !fresh && top.ind === it.ind) { top.items.push(node); continue; }
+    if (top && top.ind < it.ind && stack.length >= 4 && !fresh) { top.items.push(node); continue; }
+    const list = mk(it); list.items.push(node);
+    if (top && top.items.length) top.items[top.items.length - 1].kids.push(list); else root.push(list);
+    stack.push(list);
+  }
+  const show = (l) => `<${l.type}${l.start ? ' start="' + l.start + '"' : ''}>` + l.items.map((n) => `<li>${inline(n.text)}${n.kids.map(show).join('')}</li>`).join('') + `</${l.type}>`;
+  return { html: root.map(show).join(''), next: i };
 }
 const botMd = (t) => { const h = renderMd(t); return REG.hooks.cite ? REG.hooks.cite(h) : h; };
 function renderMd(text) {
@@ -284,7 +323,15 @@ function renderMd(text) {
       while (code.length && !code[code.length - 1].trim()) code.pop();
       out.push(codeHtml(lang, code.join('\n'))); continue;
     }
-    if ((m = l.match(/^(#{1,3})\s+(.*)$/))) { const n = m[1].length; out.push(`<h${n}>${inline(m[2])}</h${n}>`); i++; continue; }
+    if (window.KVMath && /^\s*(\$\$|\\\[)/.test(l)) {
+      const open = l.trim().startsWith('$$') ? '$$' : '\\[', close = open === '$$' ? '$$' : '\\]';
+      const first = l.trim().slice(open.length), buf = []; let j = i, done = false;
+      const k = first.indexOf(close);
+      if (k >= 0) { if (!first.slice(k + close.length).trim()) { buf.push(first.slice(0, k)); done = true; } }
+      else { buf.push(first); j = i + 1; while (j < lines.length && !isBlank(lines[j])) { const kk = lines[j].indexOf(close); if (kk >= 0) { if (!lines[j].slice(kk + close.length).trim()) { buf.push(lines[j].slice(0, kk)); done = true; } break; } buf.push(lines[j]); j++; } }
+      if (done && buf.join('').trim()) { out.push(window.KVMath.block(buf.join('\n'))); i = j + 1; continue; }
+    }
+    if ((m = l.match(/^(#{1,4})\s+(.*)$/))) { const n = m[1].length; out.push(`<h${n}>${inline(m[2])}</h${n}>`); i++; continue; }
     if (/^\s*\|/.test(l) && i + 1 < lines.length && /^\s*\|?\s*:?-{2,}/.test(lines[i + 1])) {
       const cells = (r) => r.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
       const head = cells(l); i += 2;
@@ -294,23 +341,14 @@ function renderMd(text) {
         rows.map((r) => '<tr>' + r.map((c) => `<td>${inline(c)}</td>`).join('') + '</tr>').join('') + '</tbody></table></div>');
       continue;
     }
-    if (/^\s*[-*]\s+/.test(l) && !/^\s*\*\*/.test(l)) {
-      const items = [];
-      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i]) && !/^\s*\*\*/.test(lines[i])) { items.push(lines[i].replace(/^\s*[-*]\s+/, '')); i++; }
-      out.push('<ul>' + items.map((x) => `<li>${inline(x)}</li>`).join('') + '</ul>'); continue;
-    }
-    if (/^\s*\d+[.)]\s+/.test(l)) {
-      const items = [];
-      while (i < lines.length && /^\s*\d+[.)]\s+/.test(lines[i])) { items.push(lines[i].replace(/^\s*\d+[.)]\s+/, '')); i++; }
-      out.push('<ol>' + items.map((x) => `<li>${inline(x)}</li>`).join('') + '</ol>'); continue;
-    }
+    if (isListLine(l)) { const r = listBlock(lines, i); out.push(r.html); i = r.next; continue; }
     if (/^>\s?/.test(l)) {
       const q = [];
       while (i < lines.length && /^>\s?/.test(lines[i])) { q.push(lines[i].replace(/^>\s?/, '')); i++; }
       out.push(`<blockquote class="inset">${inline(q.join(' '))}</blockquote>`); continue;
     }
     const para = [];
-    while (i < lines.length && !isBlank(lines[i]) && !/^(#{1,3}\s|\s*\||\s*```)/.test(lines[i]) && !(/^\s*[-*]\s+/.test(lines[i]) && !/^\s*\*\*/.test(lines[i])) && !/^\s*\d+[.)]\s+/.test(lines[i]) && !/^>\s?/.test(lines[i])) { para.push(lines[i]); i++; }
+    while (i < lines.length && !isBlank(lines[i]) && !/^(#{1,4}\s|\s*\||\s*```|\s*\$\$)/.test(lines[i]) && !isListLine(lines[i]) && !/^>\s?/.test(lines[i])) { para.push(lines[i]); i++; }
     if (!para.length) { para.push(lines[i]); i++; }
     out.push(`<p>${inline(para.join(' '))}</p>`);
   }
@@ -1123,14 +1161,14 @@ function renderTutor() {
 /* Offline models are small and slow, so they get a short, plain prompt: no personality, a trimmed lesson, short answers. Your Amani style comes back on a cloud model. */
 function leanPrompt(ctx) {
   const lesson = ctx.home ? 'The learner is on the home screen of a course. Course outline:\n' : 'The learner is reading this lesson. Answer from it. If the answer is not in it, say so in one short sentence, then help briefly.\nLESSON:\n';
-  return 'You are Amani, a friendly study helper in the Knowvia app. Answer in plain, simple English in under 120 words. Be accurate and never invent facts, sources, links or page numbers. If asked for a source, say you only know what this lesson says. For a lesson question that is not answered yet, never say which option is right: give a hint and ask one guiding question. If asked to quiz, ask ONE question with options A, B and C. If the learner says "Continue", carry on from where your last answer stopped.\n' + lesson + String(ctx.text || '');
+  return 'You are Amani, a friendly study helper in the Knowvia app. Answer in plain, simple English in under 120 words. Write maths as $x^2$ or $$...$$ and code in backticks. Be accurate and never invent facts, sources, links or page numbers. If asked for a source, say you only know what this lesson says. For a lesson question that is not answered yet, never say which option is right: give a hint and ask one guiding question. If asked to quiz, ask ONE question with options A, B and C. If the learner says "Continue", carry on from where your last answer stopped.\n' + lesson + String(ctx.text || '');
 }
 function systemPrompt(ctx) {
   if (S.tutor.brain === 'local') return leanPrompt(ctx);
   const who = 'You are Amani, a study companion inside the learning app Knowvia. ';
   const persona = REG.hooks.persona ? REG.hooks.persona(ctx) : 'Be warm and patient. ';
   const earlier = 'Earlier replies in this chat may have been written by a different model or in a different voice. From now on, always speak as the character above. ';
-  const rules = 'Keep explanations easy to follow. The language, tone and length rules in YOUR CHARACTER above come first. Never invent facts, statistics or sources. Examples in the lesson marked as invented are for practice only. When asked to quiz, ask ONE question with options A, B and C and wait for the reply. SOURCES: never invent a source, page number, link, book, study or quote. Name a source only if it appears in the text you were given. If the learner asks for a source or citation, say the course lists its sources on its Sources page, give only what the text itself names, and otherwise say you do not have one. QUESTIONS AND HINTS: lesson questions that are not yet answered are listed without their answers on purpose. If the learner asks for help with one, never say which option is correct. Give a hint first: point to the part of the lesson it tests and ask one guiding question. If they ask again, give a stronger hint. If they say they give up, walk through the reasoning step by step from the lesson and let them choose. A question they have already answered can be discussed fully.\n' +
+  const rules = 'Keep explanations easy to follow. The language, tone and length rules in YOUR CHARACTER above come first. Never invent facts, statistics or sources. Examples in the lesson marked as invented are for practice only. When asked to quiz, ask ONE question with options A, B and C and wait for the reply. SOURCES: never invent a source, page number, link, book, study or quote. Name a source only if it appears in the text you were given. If the learner asks for a source or citation, say the course lists its sources on its Sources page, give only what the text itself names, and otherwise say you do not have one. QUESTIONS AND HINTS: lesson questions that are not yet answered are listed without their answers on purpose. If the learner asks for help with one, never say which option is correct. Give a hint first: point to the part of the lesson it tests and ask one guiding question. If they ask again, give a stronger hint. If they say they give up, walk through the reasoning step by step from the lesson and let them choose. A question they have already answered can be discussed fully. MATHS AND CODE: write maths in LaTeX between dollar signs, $x^2$ inside a sentence and $$...$$ on its own lines for a formula, and put spreadsheet formulas and code in backticks or fenced code blocks. The app draws all of these. Never describe maths as an image.\n' +
     'After your answer, add ONE final line in exactly this form: <<next: first idea | second idea | third idea>>. These are things the learner might tap next, written in the learner\'s voice, under 8 words each, and specific to what you just said (a follow-up question, a harder example, or a request to be quizzed). Include a quiz request in most replies. If you just asked a quiz question, give the answer options instead, for example <<next: A | B | C>>. Never mention or explain this line.\n\n';
   if (ctx.home) return who + persona + earlier + 'The learner is on the home screen. They may ask about the course below or about how to study. Answer using the course. If something is not in the course, say so briefly and help from general knowledge, labelled as general knowledge. ' + rules + ctx.text;
   return who + persona + earlier + 'The learner is reading the lesson below. Answer using the lesson. If the answer is not in the lesson, say so in one short sentence, then help from general knowledge and label it as general knowledge. ' + rules +
@@ -1801,7 +1839,7 @@ function returnSplash(mode) {
 
 window.KVApp = {
   get S() { return S; }, save, saveNow, $, $$, esc, ic, I, go, goBack, toast, get route() { return route; }, renderScreen, renderTutor, renderTop, PACKS, prog, lessons, pack, lessonById,
-  qualityInfo, PROV, PROV_TOP, PROV_ALT, cloudCfg, cloudFetch, localModelList, activeModelName, tutorReady, tutorBudget, lessonContext, lessonQuestions, tutorContext, systemPrompt, showOv, studio, get DESK() { return DESK; }, inline, renderMd, parseBlocks, plainText,
+  renderMd, inline, qualityInfo, PROV, PROV_TOP, PROV_ALT, cloudCfg, cloudFetch, localModelList, activeModelName, tutorReady, tutorBudget, lessonContext, lessonQuestions, tutorContext, systemPrompt, showOv, studio, get DESK() { return DESK; }, inline, renderMd, parseBlocks, plainText,
   askTutor, chat, clearErrors, afterTutorChange, bestCloud, setLocalModels(l) { ollamaModels = (l || []).slice(); }, isNative, llm, switchToOffline, applyTheme, resolvedTheme, sleep, shuffle, get version() { return APP_VERSION; }, get busy() { return busy; },
   openTutor() { tutorOpen = true; renderTop(); renderTutor(); },
   openProvider(id) { cloudOpen = id; go('me'); setTimeout(() => { const e = document.querySelector('[data-p="' + id + '"]'); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'center' }); }, 350); },
