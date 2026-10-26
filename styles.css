@@ -1086,8 +1086,36 @@ figure.code.out{border-style:dashed}
 
 /* pictures packed inside a course (tap to enlarge) */
 .prose figure.pic{margin:14px 0}
-.prose figure.pic .pic-box{background:#fff;border-radius:14px;padding:8px;box-shadow:0 1px 2px rgba(20,20,60,.12);overflow-x:auto;-webkit-overflow-scrolling:touch}
+.prose figure.pic .pic-box{background:#fff;border-radius:14px;padding:8px;box-shadow:0 1px 2px rgba(20,20,60,.12)}
 .prose figure.pic img{display:block;max-width:100%;height:auto;margin:0 auto;cursor:zoom-in}
-.prose figure.pic.zoom img{max-width:none;width:220%;cursor:zoom-out}
 .prose figure.pic figcaption{margin-top:6px;font-size:.88em;line-height:1.45;color:var(--muted)}
 .pic-off{opacity:.8;font-style:italic}
+
+/* full-screen viewer */
+.kv-view{position:fixed;inset:0;z-index:12000;display:flex;align-items:stretch;justify-content:center;background:rgba(8,8,24,.78);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+.kv-view-card{display:flex;flex-direction:column;width:100%;max-width:1200px;height:100%;padding:calc(10px + env(safe-area-inset-top)) 10px calc(10px + env(safe-area-inset-bottom))}
+.kv-view-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 2px 8px;color:#fff}
+.kv-view-title{font-size:.95em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.kv-view-tools{display:flex;align-items:center;gap:6px;flex:none}
+.kv-view-z{min-width:3.2em;text-align:center;font-size:.85em;color:#fff;opacity:.85}
+.kv-view-body{flex:1;min-height:0;overflow:auto;background:#fff;border-radius:14px;touch-action:pan-x pan-y;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+.kv-view-item{display:block;width:100%;height:auto;margin:0 auto;user-select:none;-webkit-user-drag:none}
+.kv-view-html{padding:14px;background:var(--bg,#fff);color:var(--tx,#111);box-sizing:border-box}
+.kv-view-cap{margin:8px 4px 0;color:#fff;font-size:.9em;line-height:1.45;opacity:.92;max-height:22vh;overflow:auto}
+.prose .fig-vis[data-act]{cursor:zoom-in}
+
+/* small safe HTML, hints and chat blocks */
+.prose kbd,.bubble kbd{font-family:var(--mono,ui-monospace,Menlo,Consolas,monospace);font-size:.86em;padding:1px 6px;border-radius:6px;border:1px solid var(--line,rgba(120,120,160,.4));border-bottom-width:2px;background:rgba(120,120,160,.12)}
+.prose mark,.bubble mark{background:rgba(255,214,102,.55);color:inherit;padding:0 3px;border-radius:4px}
+details.kvd{margin:10px 0;border:1px solid var(--line,rgba(120,120,160,.35));border-radius:12px;padding:2px 12px;background:rgba(120,120,160,.07)}
+details.kvd>summary{cursor:pointer;padding:9px 0;font-weight:600;list-style:none}
+details.kvd>summary::-webkit-details-marker{display:none}
+details.kvd>summary::before{content:"+";display:inline-block;width:1.2em;font-weight:700}
+details.kvd[open]>summary::before{content:"-"}
+details.kvd>.in{padding:2px 0 10px}
+.bubble .drawing{margin:8px 0;opacity:.7;font-style:italic}
+.bubble .drawing i{font-style:normal;animation:kvblink 1.2s infinite}
+.bubble .drawing i:nth-child(2){animation-delay:.2s}.bubble .drawing i:nth-child(3){animation-delay:.4s}
+@keyframes kvblink{0%,60%,100%{opacity:.2}30%{opacity:1}}
+.bubble .keyidea{margin:10px 0}
+.bubble .fig{margin:10px 0}
