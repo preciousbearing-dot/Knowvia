@@ -254,6 +254,7 @@ function inline(s) {
   }
   s = s.replace(/\\([\\`*_{}\[\]()#+\-.!|<>~$])/g, (m, c) => { hold.push(c); return '\u0000' + (hold.length - 1) + '\u0000'; });
   s = esc(s);
+  s = s.replace(/!\[([^\]]*)\]\([^)]*\)/g, (m, a) => '[Picture: ' + a + ']');
   s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
   s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)]*[^\s<).,;])/g, '$1<a href="$2" target="_blank" rel="noopener noreferrer">$2</a>');
   /* Bold and italic follow the usual flanking rule: the opening star must not touch a letter, digit, ) ] or $ on its left,
@@ -331,6 +332,14 @@ function renderMd(text) {
       else { buf.push(first); j = i + 1; while (j < lines.length && !isBlank(lines[j])) { const kk = lines[j].indexOf(close); if (kk >= 0) { if (!lines[j].slice(kk + close.length).trim()) { buf.push(lines[j].slice(0, kk)); done = true; } break; } buf.push(lines[j]); j++; } }
       if (done && buf.join('').trim()) { out.push(window.KVMath.block(buf.join('\n'))); i = j + 1; continue; }
     }
+    if ((m = l.match(/^\s*!\[([^\]\n]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)\s*$/))) {
+      const cap = m[1].trim(), src = m[2];
+      /* only pictures packed inside the course are drawn. A web address would need the network and could track the learner. */
+      if (/^data:image\/(png|jpeg|webp|svg\+xml);base64,[A-Za-z0-9+\/=]+$/.test(src) && src.length < 400000) {
+        out.push(`<figure class="pic nofollow"><div class="pic-box"><img src="${src}" alt="${esc(cap)}" loading="lazy" decoding="async" data-act="pic-zoom"></div>${cap ? `<figcaption>${inline(cap)}</figcaption>` : ''}</figure>`);
+      } else out.push(`<p class="pic-off">[Picture: ${inline(cap)}]</p>`);
+      i++; continue;
+    }
     if ((m = l.match(/^(#{1,4})\s+(.*)$/))) { const n = m[1].length; out.push(`<h${n}>${inline(m[2])}</h${n}>`); i++; continue; }
     if (/^\s*\|/.test(l) && i + 1 < lines.length && /^\s*\|?\s*:?-{2,}/.test(lines[i + 1])) {
       const cells = (r) => r.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
@@ -348,7 +357,7 @@ function renderMd(text) {
       out.push(`<blockquote class="inset">${inline(q.join(' '))}</blockquote>`); continue;
     }
     const para = [];
-    while (i < lines.length && !isBlank(lines[i]) && !/^(#{1,4}\s|\s*\||\s*```|\s*\$\$)/.test(lines[i]) && !isListLine(lines[i]) && !/^>\s?/.test(lines[i])) { para.push(lines[i]); i++; }
+    while (i < lines.length && !isBlank(lines[i]) && !/^(#{1,4}\s|\s*\||\s*```|\s*\$\$|\s*!\[[^\]\n]*\]\([^)\s]+\)\s*$)/.test(lines[i]) && !isListLine(lines[i]) && !/^>\s?/.test(lines[i])) { para.push(lines[i]); i++; }
     if (!para.length) { para.push(lines[i]); i++; }
     out.push(`<p>${inline(para.join(' '))}</p>`);
   }
@@ -955,7 +964,8 @@ const clip = (t, n) => { t = String(t || '').trim(); if (t.length <= n) return t
 /* Reads the lesson in a fixed order of importance. Outcomes, key ideas, exercises, figure captions and the closing recap are never dropped.
    Examples and comparisons are shortened next, and ordinary paragraphs last. Anything shortened is marked, and the tutor is told. */
 function lessonContext(l, budget) {
-  const body = String(l.body || '').replace(/\r/g, ''), blocks = parseBlocks(body), items = [];
+  /* a picture is sent to the tutor as its caption only, never as image data */
+  const body = String(l.body || '').replace(/\r/g, '').replace(/^[ \t]*!\[([^\]\n]*)\]\([^)]*\)[ \t]*$/gm, '[Picture: $1]'), blocks = parseBlocks(body), items = [];
   const lastH = body.lastIndexOf('\n## '), tailStart = lastH < 0 ? body.length : lastH;
   let sec = '';
   blocks.forEach((b) => {
@@ -1783,6 +1793,7 @@ document.addEventListener('click', (ev) => {
     done();
   }
 });
+REG.acts['pic-zoom'] = (t) => { const f = t.closest('figure.pic'); if (f) f.classList.toggle('zoom'); };
 REG.acts['copy-code'] = (t) => {
   const f = t.closest('figure.code'), c = f && f.querySelector('code'); if (!c) return; const txt = c.textContent;
   const ok = () => { toast('Code copied'); t.textContent = 'Copied'; setTimeout(() => { t.textContent = 'Copy'; }, 1600); };

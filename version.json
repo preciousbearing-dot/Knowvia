@@ -1,9 +1,9 @@
 {
-  "version": "0.17.0",
+  "version": "0.18.0",
   "min": "0.0.0",
   "notes": [
-    "Formulas such as =A1*B1 now show exactly as written, and code appears in clear blocks with a Copy button.",
-    "Project Management now carries the Reviewed tag, and every course shows how it was reviewed.",
-    "Amani now sees more of your lesson and its practice questions, gives a hint before an answer, and does not invent sources."
+    "Maths now draws properly in lessons and in Amani's replies, fractions, roots, powers and step by step working, and it works offline.",
+    "Lists can now nest, and lessons can carry pictures that work offline and can be tapped to enlarge.",
+    "Amani writes maths in a form the app can draw."
   ]
 }
