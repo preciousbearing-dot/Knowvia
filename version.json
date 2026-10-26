@@ -1,9 +1,9 @@
 {
-  "version": "0.16.0",
+  "version": "0.17.0",
   "min": "0.0.0",
   "notes": [
-    "The Course store now has course pages: tap Details to see what a course teaches, then Add to shelf.",
-    "Courses can now be added to your shelf at any time without updating the app.",
-    "The Android app now looks for new courses on the live store, so you do not need a new app version to get them."
+    "Formulas such as =A1*B1 now show exactly as written, and code appears in clear blocks with a Copy button.",
+    "Project Management now carries the Reviewed tag, and every course shows how it was reviewed.",
+    "Amani now sees more of your lesson and its practice questions, gives a hint before an answer, and does not invent sources."
   ]
 }
