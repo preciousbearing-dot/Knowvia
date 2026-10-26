@@ -1,5 +1,5 @@
 {
- "updated": "2026-10-25",
+ "updated": "2026-10-26",
  "courses": [
   {
    "id": "copywriting-fundamentals",
@@ -37,15 +37,17 @@
    "level": "Beginner",
    "hours": 10,
    "lessons": 17,
-   "version": "0.1.0",
-   "bytes": 222227,
+   "version": "0.1.1",
+   "bytes": 222413,
    "file": "courses/project-management.json",
-   "status": "ai-reviewed",
-   "notes": [],
+   "status": "human-reviewed",
+   "notes": [
+    "Now marked Reviewed: the course owner has read the whole course."
+   ],
    "outcome": "Plan, lead and close a real project: write a charter, break down the work, estimate honestly, find the critical path, build a budget and risk register, run the team, control change and present a complete plan.",
    "delivery": "store",
    "risk": "moderate",
-   "reviewed": false,
+   "reviewed": true,
    "modules": [
     {
      "title": "Foundations: projects, goals and people",
