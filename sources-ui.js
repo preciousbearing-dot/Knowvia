@@ -329,6 +329,14 @@ function lessonPrompt(src, l, text, hasMath) {
     '- If this part is mostly exercises, teach how to approach each type of question and solve the clearest examples step by step.\n- Write 500 to 900 words, or less if the source is short. No introductions about yourself.';
   return [{ role: 'system', content: sys }, { role: 'user', content: 'SOURCE TEXT:\n\n' + text }];
 }
+/* tell the learner the real reason, not just "too little text" */
+function lessonWhy(why, out) {
+  const w = String(why || '').toLowerCase(), got = out.replace(/\s+/g, ' ').length;
+  if (/length|max_tokens/.test(w)) return 'The model ran out of room before it wrote the lesson (some models spend most of their allowance thinking)';
+  if (/safety|content_filter|blocked|prohibited|recitation/.test(w)) return 'The model refused this text with its safety filter';
+  if (w) return 'The model sent back nothing (reason given: ' + w.slice(0, 40) + ')';
+  return 'The model sent back only ' + got + ' characters';
+}
 function sourceText(src, a, b) {
   let t = src.units.slice(a - 1, b).map((u) => '[' + u.cite + ']' + (u.m ? ' [MATHS MAY BE GARBLED]' : '') + '\n' + u.t).join('\n\n');
   const vs = K().visIn(src, a, b);
@@ -378,15 +386,22 @@ async function prepare(packId, lessonId, describe) {
     const hasMath = src.units.slice(l.src.from - 1, l.src.to).some((u) => u.m);
     PREP.step = 1; PREP.msg = 'Amani is reading ' + src.units[l.src.from - 1].cite + ' to ' + src.units[l.src.to - 1].cite; paintPrep();
     const text = sourceText(src, l.src.from, l.src.to);
-    let out = '', tries = 0;
-    while (tries < 2) { tries++; out = String(await a.llm(lessonPrompt(src, l, text, hasMath), { model: cloudSel(), max: 3000, temp: 0.4, signal: PREP.ctrl.signal })); if (out.replace(/\s+/g, ' ').length > 500) break; }
-    if (out.replace(/\s+/g, ' ').length < 300) throw new Error('The model returned too little text.');
+    let out = '', tries = 0, why = '';
+    while (tries < 3) {
+      tries++; const msgs = lessonPrompt(src, l, text, hasMath);
+      if (tries > 1) msgs.push({ role: 'user', content: 'Write the whole lesson now, as plain text with the headings and blocks described. It needs at least 400 words. Do not explain your plan.' });
+      try { out = String(await a.llm(msgs, { model: cloudSel(), max: 3000 + tries * 1500, temp: 0.4, signal: PREP.ctrl.signal, fast: true, strict: true })); why = ''; }
+      catch (e) { if (e && e.empty !== undefined) { out = ''; why = e.empty; } else throw e; }
+      if (out.replace(/\s+/g, ' ').length > 500) break;
+      if (PREP.ctrl.signal.aborted) throw Object.assign(new Error('stopped'), { name: 'AbortError' });
+    }
+    if (out.replace(/\s+/g, ' ').length < 300) throw new Error(lessonWhy(why, out));
     PREP.step = 2; PREP.msg = 'Writing practice questions'; paintPrep();
     out = placeVisuals(out.replace(/```[a-z]*\n?/g, '').trim(), src, l.src.from, l.src.to); const tm = out.match(/^#\s+(.+)$/m); let title = l.title; if (tm) { title = tm[1].replace(/[*_`]/g, '').trim().slice(0, 90); out = out.replace(tm[0], '').trim(); }
     if (!/:::keyidea/.test(out)) out += '\n\n:::keyidea\n' + (title || 'Review the main idea above.') + '\n:::';
     let qz = { quiz: [], cards: [] };
     try {
-      const j = parseJson(await a.llm([{ role: 'system', content: 'Return ONLY valid JSON, with no text before or after it.' }, { role: 'user', content: 'Here is a lesson.\n\n' + out.slice(0, 7000) + '\n\nWrite 4 multiple-choice questions and 4 flashcards about it, using only what the lesson says. Each question has "prompt", "options" (4 strings, exactly one correct, three plausible wrong answers), "answer" (index 0 to 3) and "explanation" (one sentence). Each flashcard has "front" and "back". Return {"quiz":[...],"cards":[...]}.' }], { model: cloudSel(), max: 2200, temp: 0.3, signal: PREP.ctrl.signal }));
+      const j = parseJson(await a.llm([{ role: 'system', content: 'Return ONLY valid JSON, with no text before or after it.' }, { role: 'user', content: 'Here is a lesson.\n\n' + out.slice(0, 7000) + '\n\nWrite 4 multiple-choice questions and 4 flashcards about it, using only what the lesson says. Each question has "prompt", "options" (4 strings, exactly one correct, three plausible wrong answers), "answer" (index 0 to 3) and "explanation" (one sentence). Each flashcard has "front" and "back". Return {"quiz":[...],"cards":[...]}.' }], { model: cloudSel(), max: 3200, temp: 0.3, signal: PREP.ctrl.signal, fast: true }));
       qz.quiz = (j.quiz || []).filter((q) => q && q.prompt && Array.isArray(q.options) && q.options.length >= 3 && Number.isInteger(+q.answer) && +q.answer < q.options.length && q.explanation).slice(0, 5); qz.cards = (j.cards || []).filter((c) => c && c.front && c.back).slice(0, 6);
     } catch (e) { if (e && e.name === 'AbortError') throw e; qz = { quiz: [], cards: [] }; }
     l.title = title; l.body = out; l.ready = true; l.minutes = Math.max(3, Math.round(out.split(/\s+/).length / 170) + 2); l.outcomes = [];
@@ -398,7 +413,7 @@ async function prepare(packId, lessonId, describe) {
     const r = a.route; if (r.name === 'lesson' && r.id === lessonId) a.renderScreen(); a.toast('Lesson ready');
   } catch (e) {
     PREP.key = ''; PREP.ctrl = null; PREP.step = 0;
-    if (e && e.name === 'AbortError') { PREP.err = ''; } else { PREP.err = e && e.code === 'quota' ? e.message + ' Wait a few minutes and try again, or connect another cloud model in Me. Pages already read are kept.' : (e && /^These pages are pictures|^The original file is not stored/.test(e.message || '')) || (e && e.code) ? e.message : a.netErr && a.netErr(e) ? 'The cloud model could not be reached. Check your internet and try again.' : 'Amani could not finish this lesson: ' + ((e && e.message) || 'unknown error') + '. Try again, or pick a different cloud model from the model menu.'; }
+    if (e && e.name === 'AbortError') { PREP.err = ''; } else { PREP.err = e && e.code === 'quota' ? e.message + ' Wait a few minutes and try again, or connect another cloud model in Me. Pages already read are kept.' : (e && /^These pages are pictures|^The original file is not stored/.test(e.message || '')) || (e && e.code) ? e.message : a.netErr && a.netErr(e) ? 'The cloud model could not be reached. Check your internet and try again.' : 'Amani could not finish this lesson: ' + String((e && e.message) || 'unknown error').replace(/[.\s]+$/, '') + '. Try again, or pick a different cloud model from the model menu (Gemini Flash works well).'; }
     paintPrep();
   }
 }

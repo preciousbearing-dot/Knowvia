@@ -1902,7 +1902,10 @@ async function llm(messages, o) {
   if (!r.ok && r.status === 400 && body.reasoning_effort) { let t0 = ''; try { t0 = await r.clone().text(); } catch (e) { /* ignore */ } if (/reasoning|unknown|unrecognized|unsupported/i.test(t0)) { delete body.reasoning_effort; r = await post(); } }
   if (!r.ok) { let b = ''; try { b = (await r.text()).slice(0, 420); } catch (e) { /* ignore */ } throw new Error('HTTP ' + r.status + (b ? ' ' + b : '')); }
   const j = await r.json();
-  return (j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || '';
+  const ch0 = j.choices && j.choices[0], txt0 = (ch0 && ch0.message && ch0.message.content) || '';
+  /* a "strict" caller wants to know why nothing came back: ran out of room (often hidden thinking), blocked, or truly empty */
+  if (o.strict && !String(txt0).trim()) { const e = new Error('empty answer'); e.empty = String((ch0 && (ch0.finish_reason || ch0.finishReason)) || 'unknown'); throw e; }
+  return txt0;
 }
 function switchToOffline(auto) {
   const loc = localModelList(); if (!loc.length) return false;

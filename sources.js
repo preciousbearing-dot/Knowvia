@@ -580,12 +580,15 @@ async function readPages(srcId, nums, ctx) {
   const cands = vision.candidates(); if (!cands.length) throw new SrcError('Reading pages as images needs a cloud model that can see images. Gemini has a free plan that works well: connect it in Me.', 'novision');
   if (!src.hasFile) throw new SrcError('The original file is not stored on this device, so its pages cannot be read as images. Open the source and press Add the PDF again.', 'nofile');
   const todo = Array.from(new Set(nums)).filter((n) => src.units[n - 1] && !src.units[n - 1].v).sort((a, b) => a - b); if (!todo.length) return { read: 0, failed: 0 };
-  const B = 3, t0 = Date.now(); let done = 0, ci = 0, failed = 0, lastSave = 0, lastErr = null; const rep = (msg) => { if (!ctx.onProgress) return; const el = (Date.now() - t0) / 1000, rate = done / Math.max(1, el); ctx.onProgress({ frac: done / todo.length, msg, eta: done ? Math.round((todo.length - done) / rate) : 0, done, total: todo.length }); };
+  const B = 2, W = todo.length > 2 ? 2 : 1, t0 = Date.now(); let done = 0, ci = 0, failed = 0, lastSave = 0, lastErr = null, next = 0, stop = null; const rep = (msg) => { if (!ctx.onProgress) return; const el = (Date.now() - t0) / 1000, rate = done / Math.max(1, el); ctx.onProgress({ frac: done / todo.length, msg, eta: done ? Math.round((todo.length - done) / rate) : 0, done, total: todo.length }); };
   const save = async () => { src.stats.chars = src.units.reduce((s, u) => s + u.t.length, 0); src.stats.math = src.units.filter((u) => u.m).length; src.stats.read = src.units.filter((u) => u.v).length; IDX.delete(srcId); await Store.put(src); };
-  try {
-    for (let i = 0; i < todo.length; i += B) {
+  const groups = []; for (let i = 0; i < todo.length; i += B) groups.push(todo.slice(i, i + B));
+  /* two groups are read at the same time, so a page does not wait for the one before it */
+  const worker = async () => {
+    while (!stop) {
       if (ctx.signal && ctx.signal.aborted) throw new Cancelled();
-      const grp = todo.slice(i, i + B); rep('Reading ' + (grp.length === 1 ? src.units[grp[0] - 1].cite : src.units[grp[0] - 1].cite + ' to ' + src.units[grp[grp.length - 1] - 1].cite) + ' (' + Math.min(todo.length, i + 1) + ' of ' + todo.length + ')');
+      const gi = next++; if (gi >= groups.length) return; const grp = groups[gi];
+      rep('Reading ' + (grp.length === 1 ? src.units[grp[0] - 1].cite : src.units[grp[0] - 1].cite + ' to ' + src.units[grp[grp.length - 1] - 1].cite) + ' (' + Math.min(todo.length, done + 1) + ' of ' + todo.length + ')');
       const imgs = []; for (const n of grp) imgs.push(await unitImage(src, n));
       let got = null; ctx.frac = done / todo.length;
       while (ci < cands.length && !got) { try { got = await askVision(cands[ci], grp, imgs, ctx); } catch (e) { if (e && (e.name === 'AbortError' || e.name === 'Cancelled')) throw e; lastErr = e; if (e.net) throw e; ci++; } }
@@ -595,9 +598,13 @@ async function readPages(srcId, nums, ctx) {
         const u = src.units[n - 1], t = got[n]; if (t === undefined) { failed++; return; }
         if (/^\[?\(?blank( page)?\)?\]?\.?$/i.test(t)) { u.t = '(This page is blank.)'; u.e = 1; } else { u.t = t; u.e = 0; } u.v = 1; u.m = 0; done++;
       });
-      if (done - lastSave >= 9) { lastSave = done; await save(); }
+      if (done - lastSave >= 6) { lastSave = done; await save(); }
       rep(done + ' of ' + todo.length + ' pages read');
     }
+  };
+  try {
+    const ws = []; for (let w = 0; w < W; w++) ws.push(worker().catch((e) => { stop = stop || e; }));
+    await Promise.all(ws); if (stop) throw stop;
   } finally { closeDoc(srcId); try { if (done) { await save(); buildIndex(src); } } catch (e) { /* ignore */ } }
   return { read: done, failed };
 }
