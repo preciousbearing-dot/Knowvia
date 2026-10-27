@@ -1135,3 +1135,10 @@ img.pgimg[data-act]{cursor:zoom-in}
 .kv-view-tools{flex-wrap:wrap;justify-content:flex-end}
 .kv-view-tools{flex:1 1 100%;gap:5px;justify-content:space-between}
 .kv-view-tools .btn.sm{padding-left:11px;padding-right:11px}
+
+/* what Amani found */
+.prof{margin:14px 0;padding:16px 16px 12px;border-radius:20px}
+.prof h3{margin:2px 0 6px}
+.prof .prof-why{margin:6px 0 8px;padding-left:20px}
+.prof .row-actions{margin:8px 0}
+.ov-card .prof{margin:0;box-shadow:none}

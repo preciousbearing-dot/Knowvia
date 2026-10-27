@@ -38,15 +38,17 @@ function windows(src, from, to) {
   return out;
 }
 const span = (src, a, b) => { const x = src.units[a - 1].cite, y = src.units[b - 1].cite; return a === b ? x : x + ' to ' + y; };
-function makePack(src) {
-  const chs = (src.chapters || []).filter((c) => !c.front), list = chs.length ? chs : [{ title: src.title, from: 1, to: src.units.length }];
+const P = () => window.KVProfile;
+function makePack(src, mode) {
+  const whole = mode === 'summary' || mode === 'keyideas', chs = (src.chapters || []).filter((c) => !c.front), list = whole ? [{ title: mode === 'summary' ? 'Summary' : 'Key ideas', from: 1, to: src.units.length }] : (chs.length ? chs : [{ title: src.title, from: 1, to: src.units.length }]);
   let li = 0;
   const modules = list.map((c, ci) => {
+    if (whole) { li++; return { id: 'm1', title: c.title, lessons: [{ id: 'l1', title: c.title, subtitle: span(src, 1, src.units.length), minutes: 4, outcomes: [], body: 'Amani writes a ' + (mode === 'summary' ? 'short summary' : 'list of key ideas') + ' of your source when you prepare it.', src: { from: 1, to: src.units.length }, mode, ready: false }] }; }
     const w = windows(src, c.from, c.to);
     return { id: 'm' + (ci + 1), title: c.title, lessons: w.map((r, k) => { li++; return { id: 'l' + li, title: w.length > 1 ? 'Part ' + (k + 1) + ' of ' + w.length : c.title, subtitle: span(src, r[0], r[1]), minutes: 8, outcomes: [], body: 'This lesson covers **' + span(src, r[0], r[1]) + '** of your source. Amani writes it from your own material when you prepare it.', src: { from: r[0], to: r[1] }, ready: false }; }) };
   });
   const lessons = modules.reduce((a, m) => a + m.lessons.length, 0), mins = Math.round(src.stats.chars / 1100);
-  return { formatVersion: 1, id: packIdOf(src.id), title: src.title, subtitle: 'From your own ' + kname(src.kind).toLowerCase() + '. Written by Amani from your material.', level: 'Your source', language: 'en', version: '1.0.0', estimatedHours: Math.max(0.5, Math.round(mins / 6) / 10), outcome: 'Understand and use what is in ' + src.title + '.', author: 'Built by Amani from your own source', origin: 'upload', source: { id: src.id, kind: src.kind, title: src.title }, quality: { researched: false, factChecked: 'Written only from your source text. Check anything important in the original.' }, modules, quiz: [], flashcards: [], sources: '# Your source\n\n**' + esc(src.title) + '**\n\n' + kname(src.kind) + ', added ' + new Date(src.addedAt).toDateString() + '.' + (src.url ? '\n\n' + src.url : '') };
+  return { formatVersion: 1, id: packIdOf(src.id), title: src.title, subtitle: 'From your own ' + kname(src.kind).toLowerCase() + '. Written by Amani from your material.', level: 'Your source', language: 'en', version: '1.0.0', estimatedHours: Math.max(0.5, Math.round(mins / 6) / 10), outcome: 'Understand and use what is in ' + src.title + '.', author: 'Built by Amani from your own source', origin: 'upload', source: { id: src.id, kind: src.kind, title: src.title }, quality: { researched: false, factChecked: 'Written only from your source text. Check anything important in the original.' }, mode: mode || '', modules, quiz: [], flashcards: [], sources: '# Your source\n\n**' + esc(src.title) + '**\n\n' + kname(src.kind) + ', added ' + new Date(src.addedAt).toDateString() + '.' + (src.url ? '\n\n' + src.url : '') };
 }
 async function ensurePack(src) {
   const a = A(); let p = a.PACKS.find((x) => x.id === packIdOf(src.id));
@@ -282,6 +284,7 @@ REG.screens.source = function (route) {
     <p class="lede">${num(src.units.length)} ${word} · ${num(chs.filter((c) => !c.front).length || 1)} ${(chs.filter((c) => !c.front).length || 1) === 1 ? 'chapter' : 'chapters'} · ${num(Math.round(src.stats.chars / 5))} words · added ${ago(src.addedAt)}${src.url ? ' · <a href="' + esc(src.url) + '" target="_blank" rel="noopener">original</a>' : ''}</p></div>
     ${notes}
     ${visPanel(src)}
+    ${profCard(src)}
     <div class="row-actions"><button class="btn primary" data-act="src-study" data-id="${id}">${ic(a.I.spark, 18, 2)}Study this</button><button class="btn" data-act="src-ask" data-id="${id}">${ic(a.I.chat, 18, 2)}Ask Amani about it</button></div>
     <label class="lsearch inset">${ic(IC.search, 18, 2)}<input id="src-q" type="search" placeholder="Search inside this source" autocomplete="off" aria-label="Search inside this source" data-id="${id}"></label>
     <div id="src-hits"></div>
@@ -300,7 +303,42 @@ REG.acts['src-chapter'] = async (t, d) => {
   const a = A(), src = await K().Store.get(d.id); const p = await ensurePack(src); a.setActivePack(p.id);
   const from = +d.from, l = p.modules.reduce((x, m) => x.concat(m.lessons), []).find((x) => x.src && x.src.from >= from) || p.modules[0].lessons[0]; a.go('lesson/' + l.id);
 };
-REG.acts['src-study'] = async (t, d) => { const a = A(), src = await K().Store.get(d.id), p = await ensurePack(src); a.setActivePack(p.id); a.go('learn'); };
+/* ---------------- What Amani found: shown only when she is unsure the source can be taught ---------------- */
+const LOOK = { id: '', err: '' };
+const anyReady = (p) => !!(p && p.modules.some((m) => m.lessons.some((l) => l.ready)));
+function gated(src, p) { const pr = P() && P().of(src); return !!(pr && pr.unsure && !src.ack && !anyReady(p)); }
+function profCard(src, sheet) {
+  const a = A(), pr = P() && P().of(src), p = a.PACKS.find((x) => x.id === packIdOf(src.id)); if (!pr || !pr.unsure || src.ack || anyReady(p)) return '';
+  const none = pr.teach === 'none', offers = pr.offers.filter((o) => o !== 'lessons'), look = pr.by === 'rules' && cloudOk();
+  const head = pr.by === 'ai' ? 'This looks like ' + pr.label : none ? 'There is not much here to teach' : 'This may not need full lessons';
+  const reasons = pr.reasons.map((r) => `<li>${esc(r)}</li>`).join(''), busy = LOOK.id === src.id;
+  const btn = (o, i) => `<button class="btn ${i === 0 ? 'primary' : ''}" data-act="src-mode" data-id="${esc(src.id)}" data-mode="${o}">${esc(P().OFFERS[o])}</button>`;
+  return `<section class="prof pn-strong ${sheet ? 'sheet' : ''}" id="prof-card"><p class="eyebrow">What Amani found</p><h3>${esc(head)}</h3>${pr.summary ? `<p>${esc(pr.summary)}</p>` : ''}${reasons ? `<ul class="prof-why">${reasons}</ul>` : ''}
+    <p class="help">${none ? 'Lessons with quizzes would be made up from almost nothing. Here is what makes sense instead.' : 'Lessons with practice questions work best on teaching material. You choose what happens next.'}</p>
+    ${LOOK.err && LOOK.id === '' ? `<p class="help prep-err">${esc(LOOK.err)}</p>` : ''}
+    <div class="row-actions">${offers.map(btn).join('')}${look ? `<button class="btn" data-act="src-look" data-id="${esc(src.id)}" ${busy ? 'disabled' : ''}>${busy ? 'Looking…' : 'Ask Amani to take a closer look'}</button>` : ''}</div>
+    <p class="help"><button class="linkbtn" data-act="src-mode" data-id="${esc(src.id)}" data-mode="lessons">${esc(P().OFFERS.lessons)}</button>${look ? ' Looking closer sends a few short samples of the text to your cloud model.' : ''}</p>${sheet ? `<div class="row-actions"><button class="btn sm" data-act="prof-close">Not now</button></div>` : ''}</section>`;
+}
+function repaintSource(id) { const r = A().route; if (r.name === 'source' && r.id === id && !r.sub) A().renderScreen(); const o = document.getElementById('prof-ov'); if (o) { K().Store.get(id).then((src) => { if (src) { const c = profCard(src, true); if (c) o.querySelector('.ov-card').innerHTML = c; else o.remove(); } }); } }
+REG.acts['src-look'] = async (t, d) => {
+  const a = A(), src = await K().Store.get(d.id); if (!src || LOOK.id) return; LOOK.id = src.id; LOOK.err = ''; repaintSource(src.id);
+  try { const pr = await P().ask(src, { model: cloudSel() }); src.profile = pr; await K().Store.put(src); }
+  catch (e) { LOOK.err = e && e.bad ? 'Amani could not make sense of the answer. Try again, or choose what to do below.' : a.netErr && a.netErr(e) ? 'The cloud model could not be reached. Check your internet and try again.' : 'Amani could not take a closer look (' + String((e && e.message) || 'unknown error').replace(/[.\s]+$/, '').slice(0, 120) + '). You can still choose below.'; }
+  const failed = LOOK.err; LOOK.id = ''; repaintSource(src.id); if (failed) a.toast(failed);
+};
+REG.acts['src-mode'] = async (t, d) => {
+  const a = A(), src = await K().Store.get(d.id); if (!src) return; const mode = d.mode; const o = document.getElementById('prof-ov'); if (o) o.remove();
+  src.ack = mode; await K().Store.put(src);
+  if (mode === 'chat') { const p = await ensurePack(src); a.setActivePack(p.id); a.go('home'); setTimeout(() => a.openTutor(), 250); return; }
+  if (mode === 'summary' || mode === 'keyideas') { const np = makePack(src, mode); await window.KVStore.save(np); a.addPack(np); a.setActivePack(np.id); a.go('lesson/l1'); return; }
+  const p = await ensurePack(src); a.setActivePack(p.id); a.go('learn');
+};
+REG.acts['prof-close'] = () => { const o = document.getElementById('prof-ov'); if (o) o.remove(); };
+REG.acts['src-study'] = async (t, d) => {
+  const a = A(), src = await K().Store.get(d.id), p = await ensurePack(src);
+  if (gated(src, p)) { let o = document.getElementById('prof-ov'); if (o) o.remove(); o = document.createElement('div'); o.id = 'prof-ov'; o.className = 'ov'; o.setAttribute('role', 'dialog'); o.setAttribute('aria-modal', 'true'); o.setAttribute('aria-label', 'What Amani found'); o.innerHTML = '<div class="ov-card pn-strong kv-in">' + profCard(src, true) + '</div>'; document.body.appendChild(o); return; }
+  a.setActivePack(p.id); a.go('learn');
+};
 REG.acts['src-ask'] = async (t, d) => { const a = A(), src = await K().Store.get(d.id), p = await ensurePack(src); a.setActivePack(p.id); a.go('home'); setTimeout(() => a.openTutor(), 250); };
 REG.acts['src-open'] = (t, d) => A().go('source/' + d.id + '/' + d.n);
 REG.acts['src-del'] = (t, d) => {
@@ -319,6 +357,15 @@ const PREP = { key: '', ctrl: null, msg: '', err: '', step: 0, pct: null, note: 
 const cloudOk = () => !!(A().bestCloud && A().bestCloud());
 const cloudSel = () => (A().bestCloud && A().bestCloud()) || undefined;
 function parseJson(s) { s = String(s || '').replace(/```(?:json)?/gi, ''); const i = s.indexOf('{'), j = s.lastIndexOf('}'); if (i < 0 || j <= i) throw new Error('no json'); return JSON.parse(s.slice(i, j + 1)); }
+/* a summary or key-ideas page is short and has no quiz. Very long sources are sampled from the start, middle and end. */
+function sampleText(text, cap) { if (text.length <= cap) return text; const t = Math.floor(cap / 3); return text.slice(0, t) + '\n\n[...]\n\n' + text.slice(Math.floor(text.length / 2 - t / 2), Math.floor(text.length / 2 + t / 2)) + '\n\n[...]\n\n' + text.slice(-t); }
+function summaryPrompt(src, mode, text) {
+  const key = mode === 'keyideas';
+  const sys = 'You are Amani, writing for a learner from THEIR OWN source, "' + src.title + '". Use ONLY the source text you are given. Never add facts that are not in it. If the source is mostly entertainment, say so honestly in one sentence instead of pretending it teaches.\nRules:\n- First line: "# " then a short, specific title.\n' +
+    (key ? '- Write 5 to 9 key ideas. Each is a bold short heading line then one or two plain sentences. No exercises and no quiz.\n' : '- Write a clear summary of about 150 to 300 words in plain, friendly language, then a short list of the main points under "## Main points". No exercises and no quiz.\n') +
+    '- Add one block ":::keyidea" with the single most important takeaway (a line starting with :::keyidea, the sentence, then a line containing only :::).\n- Where a statement comes from a labelled part, write that label exactly as it appears in the source in square brackets, like [3:20]. Use only labels that appear in the source.\n- Do not write introductions about yourself.';
+  return [{ role: 'system', content: sys }, { role: 'user', content: 'SOURCE TEXT:\n\n' + sampleText(text, 24000) }];
+}
 function lessonPrompt(src, l, text, hasMath) {
   const sys = 'You are Amani, writing one study lesson for a learner from THEIR OWN source, "' + src.title + '". Use ONLY the source text you are given. Never add facts that are not in it.\n' +
     'Rules:\n- First line: "# " then a short, specific lesson title taken from the content.\n- Teach in clear, friendly, simple language. Explain each idea. Keep the source\'s definitions, formulas and worked examples, with maths written in plain text such as A^2, 1/2, sqrt(x), [[1,2],[3,4]].\n' +
@@ -386,21 +433,22 @@ async function prepare(packId, lessonId, describe) {
     const hasMath = src.units.slice(l.src.from - 1, l.src.to).some((u) => u.m);
     PREP.step = 1; PREP.msg = 'Amani is reading ' + src.units[l.src.from - 1].cite + ' to ' + src.units[l.src.to - 1].cite; paintPrep();
     const text = sourceText(src, l.src.from, l.src.to);
-    let out = '', tries = 0, why = '';
+    const whole = l.mode === 'summary' || l.mode === 'keyideas'; let out = '', tries = 0, why = '';
     while (tries < 3) {
-      tries++; const msgs = lessonPrompt(src, l, text, hasMath);
+      tries++; const msgs = whole ? summaryPrompt(src, l.mode, text) : lessonPrompt(src, l, text, hasMath);
       if (tries > 1) msgs.push({ role: 'user', content: 'Write the whole lesson now, as plain text with the headings and blocks described. It needs at least 400 words. Do not explain your plan.' });
       try { out = String(await a.llm(msgs, { model: cloudSel(), max: 3000 + tries * 1500, temp: 0.4, signal: PREP.ctrl.signal, fast: true, strict: true })); why = ''; }
       catch (e) { if (e && e.empty !== undefined) { out = ''; why = e.empty; } else throw e; }
-      if (out.replace(/\s+/g, ' ').length > 500) break;
+      if (out.replace(/\s+/g, ' ').length > (whole ? 300 : 500)) break;
       if (PREP.ctrl.signal.aborted) throw Object.assign(new Error('stopped'), { name: 'AbortError' });
     }
-    if (out.replace(/\s+/g, ' ').length < 300) throw new Error(lessonWhy(why, out));
+    if (out.replace(/\s+/g, ' ').length < (whole ? 200 : 300)) throw new Error(lessonWhy(why, out));
     PREP.step = 2; PREP.msg = 'Writing practice questions'; paintPrep();
     out = placeVisuals(out.replace(/```[a-z]*\n?/g, '').trim(), src, l.src.from, l.src.to); const tm = out.match(/^#\s+(.+)$/m); let title = l.title; if (tm) { title = tm[1].replace(/[*_`]/g, '').trim().slice(0, 90); out = out.replace(tm[0], '').trim(); }
     if (!/:::keyidea/.test(out)) out += '\n\n:::keyidea\n' + (title || 'Review the main idea above.') + '\n:::';
     let qz = { quiz: [], cards: [] };
-    try {
+    const wantQuiz = !whole && !(P() && P().of(src).quiz === false);
+    if (wantQuiz) try {
       const j = parseJson(await a.llm([{ role: 'system', content: 'Return ONLY valid JSON, with no text before or after it.' }, { role: 'user', content: 'Here is a lesson.\n\n' + out.slice(0, 7000) + '\n\nWrite 4 multiple-choice questions and 4 flashcards about it, using only what the lesson says. Each question has "prompt", "options" (4 strings, exactly one correct, three plausible wrong answers), "answer" (index 0 to 3) and "explanation" (one sentence). Each flashcard has "front" and "back". Return {"quiz":[...],"cards":[...]}.' }], { model: cloudSel(), max: 3200, temp: 0.3, signal: PREP.ctrl.signal, fast: true }));
       qz.quiz = (j.quiz || []).filter((q) => q && q.prompt && Array.isArray(q.options) && q.options.length >= 3 && Number.isInteger(+q.answer) && +q.answer < q.options.length && q.explanation).slice(0, 5); qz.cards = (j.cards || []).filter((c) => c && c.front && c.back).slice(0, 6);
     } catch (e) { if (e && e.name === 'AbortError') throw e; qz = { quiz: [], cards: [] }; }
@@ -421,6 +469,7 @@ function prepHtml(l, p) {
   const a = A(), r = l.src, key = p.id + ':' + l.id, busy = PREP.key === key;
   const sx = K().Store.peek(p.source.id), nv = sx ? K().visIn(sx, r.from, r.to).length : 0, nd = sx ? K().visIn(sx, r.from, r.to).filter((v) => !v.desc).length : 0;
   const paged = sx && (sx.kind === 'pdf' || sx.kind === 'photo') && sx.hasFile;
+  if (!l.ready && sx && P() && P().of(sx).unsure && !sx.ack && !busy) return `<section class="prep pn-strong" id="prep-card"><h3>Amani is not sure about this one</h3><p class="help">${esc((P().of(sx).reasons[0] || 'This source may not have much to teach.'))} See what she found before you turn it into lessons.</p><div class="row-actions"><button class="btn primary" data-act="nav" data-r="source/${esc(p.source.id)}">See what she found</button><button class="btn" data-act="src-mode" data-id="${esc(p.source.id)}" data-mode="lessons">Make lessons anyway</button></div></section>`;
   if (l.ready) return `<p class="help srcfrom">Written from <b>${esc(l.subtitle)}</b> of your source. <button class="linkbtn" data-act="src-open" data-id="${esc(p.source.id)}" data-n="${r.from}">Read the original text</button>${paged ? ` <button class="linkbtn" data-act="src-orig" data-id="${esc(p.source.id)}" data-from="${r.from}" data-to="${r.to}">View the original ${r.to > r.from ? 'pages' : 'page'}</button>` : ''}${nd && K().vision.info().ok ? ` <button class="linkbtn" data-act="src-descpics" data-p="${esc(p.id)}" data-l="${esc(l.id)}">Describe ${nd} ${nd === 1 ? 'picture' : 'pictures'} with a cloud model</button>` : ''}</p>`;
   if (busy) return `<section class="prep pn-strong" id="prep-card"><h3>Preparing this lesson</h3><p class="help">${esc(PREP.msg)}</p><div class="bar"><i style="width:${PREP.step === 2 ? 80 : PREP.pct != null ? Math.round(5 + PREP.pct * 30) : 40}%"></i></div>${PREP.note ? `<p class="help">${esc(PREP.note)}</p>` : ''}<p class="help">A few minutes at most, depending on the model. You can keep this open.</p><div class="row-actions"><button class="btn" data-act="src-prep-cancel">Cancel</button></div></section>`;
   if (PREP.key) return `<section class="prep pn-strong" id="prep-card"><h3>Another lesson is being prepared</h3><p class="help">Wait for it to finish, then prepare this one.</p></section>`;
@@ -429,7 +478,7 @@ function prepHtml(l, p) {
 }
 function paintPrep() { const a = A(), r = a.route; if (r.name !== 'lesson') return; const el = document.getElementById('prep-card') || document.querySelector('.srcfrom'); const p = a.pack(), l = a.lessonById(r.id); if (!el || !l || !l.src) return; const h = prepHtml(l, p), t = document.createElement('div'); t.innerHTML = h; if (t.firstElementChild) el.replaceWith(t.firstElementChild); }
 REG.hooks.lessonExtra = ((prev) => (l) => { const a = A(), p = a.pack(), x = prev ? prev(l) : ''; return x + (p && p.source && l.src ? prepHtml(l, p) : ''); })(REG.hooks.lessonExtra);
-window.KVSrcUI = { placeVisuals, sourceText, lessonPrompt, picsHtml };
+window.KVSrcUI = { placeVisuals, sourceText, lessonPrompt, picsHtml, summaryPrompt, makePack, profCard };
 REG.acts['src-prep'] = (t, d) => { prepare(d.p, d.l, d.desc === '1'); };
 REG.acts['src-prep-cancel'] = () => { if (PREP.ctrl) PREP.ctrl.abort(); };
 
