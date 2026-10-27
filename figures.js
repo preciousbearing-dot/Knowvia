@@ -174,7 +174,7 @@ function render(text) {
   const cap = f.caption ? `<p class="fig-cap">${inl(f.caption)}</p>` : '';
   if (!ok) return `<figure class="fig fig-off" data-fid="${id}">${title}${cap}</figure>`;
   const big = f.type === 'network' || f.type === 'gantt' || f.type === 'cycle';
-  return `<figure class="fig fg-t-${f.type}" data-fid="${id}">${title}<div class="fig-vis" aria-hidden="true" data-ftype="${f.type}">${vis}</div>${cap}${big ? `<button type="button" class="fig-zoom" data-act="fig-zoom" data-fid="${id}" aria-label="Enlarge this figure">Enlarge</button>` : ''}</figure>`;
+  return `<figure class="fig fg-t-${f.type}" data-fid="${id}">${title}<div class="fig-vis" aria-hidden="true" data-ftype="${f.type}" data-act="fig-zoom" data-fid="${id}">${vis}</div>${cap}${big ? `<button type="button" class="fig-zoom" data-act="fig-zoom" data-fid="${id}" aria-label="Enlarge this figure">Enlarge</button>` : ''}</figure>`;
 }
 
 /* A plain-text version for the tutor and the voice: title, then the caption that says what the figure shows. */

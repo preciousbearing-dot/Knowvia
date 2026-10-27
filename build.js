@@ -741,6 +741,7 @@ async function writeLesson(j, w, t, i, st) {
     st.body += (st.body ? '\n\n' : '') + part; if (prac) st.prac = prac;
   }
   let body = st.body;
+  body = cleanFigures(body, j, i);
   if (!/:::keyidea/.test(body)) { body += '\n\n:::keyidea\n' + (L.outcomes[0] || L.subtitle || L.title) + '\n:::'; j.weak.push('Lesson ' + (i + 1) + ' was missing a key idea, so a simple one was added.'); }
   if (!/:::example/.test(body)) j.weak.push('Lesson ' + (i + 1) + ' has no worked example block.');
   if (!/:::exercise/.test(body)) j.weak.push('Lesson ' + (i + 1) + ' has no task for the learner.');
@@ -753,6 +754,14 @@ async function writeLesson(j, w, t, i, st) {
   if (!qz) qz = await quizStep(j, w, t, i, body, L);
   let vids = []; try { vids = await videoStep(j, i); } catch (e) { vids = []; }
   return { body, refs, words: words(body), qz, vids };
+}
+/* A figure the app cannot draw (or a fourth one in a lesson) is removed, with a note, so the learner never meets a broken box. */
+function cleanFigures(body, j, i) {
+  if (!window.KVFig) return body;
+  let removed = 0, kept = 0;
+  body = body.replace(/^:::figure[^\n]*\n([\s\S]*?)\n:::[ \t]*$/gm, (m, t) => { const r = window.KVFig.check(t); if (r.ok && kept < 3) { kept++; return m; } removed++; return ''; });
+  if (removed) j.weak.push('Lesson ' + (i + 1) + ': ' + removed + ' diagram' + (removed > 1 ? 's' : '') + ' could not be drawn or were too many, so ' + (removed > 1 ? 'they were' : 'it was') + ' left out.');
+  return body;
 }
 function lessonTask(j, i, again) {
   const L = j.plan.lessons[i], st = {};
@@ -1016,5 +1025,5 @@ R['b-pb-dl'] = () => { const b = new Blob([PB().full], { type: 'text/markdown' }
 /* search box: update results without losing focus */
 document.addEventListener('input', (ev) => { if (ev.target && ev.target.id === 'bq') { BS.q = ev.target.value; const r = A().$('#bres'); if (r) r.innerHTML = resultsHtml(); } });
 document.addEventListener('submit', (ev) => { if (ev.target && ev.target.id === 'bform') { ev.preventDefault(); const q = (A().$('#bq') || {}).value || ''; if (q.trim().length >= 2) { BS.topic = q.trim(); BS.view = 'setup'; A().renderScreen(); } } });
-window.KVBuild.state = BS; window.KVBuild.limits = LIM; window.KVBuild.cool = COOL;
+window.KVBuild.cleanFigures = cleanFigures; window.KVBuild.state = BS; window.KVBuild.limits = LIM; window.KVBuild.cool = COOL;
 })();

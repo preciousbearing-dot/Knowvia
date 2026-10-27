@@ -242,6 +242,27 @@ function qualityInfo(q) {
 }
 
 /* ---------------- Markdown ---------------- */
+/* A small, fixed set of HTML tags is allowed in text: sub, sup, kbd, mark, small, u, del, s, b, i, em, strong, abbr (with a title) and br.
+   Nothing else is ever drawn as HTML: every other tag, every attribute and every script stays as plain text. Tags must be paired,
+   anything left open is closed, and a stray closing tag is shown as text. This runs on text that has already been escaped. */
+const OK_TAGS = ['sub', 'sup', 'kbd', 'mark', 'small', 'u', 'del', 's', 'b', 'i', 'em', 'strong', 'abbr'];
+const TAG_RE = new RegExp('&lt;(\\/?)(' + OK_TAGS.join('|') + '|br)((?:\\s+title=&quot;[^&"<>]{0,80}&quot;)?)\\s*(\\/?)&gt;', 'gi');
+function allowTags(s) {
+  if (s.indexOf('&lt;') < 0) return s;
+  const stack = []; let out = '', last = 0, m; TAG_RE.lastIndex = 0;
+  while ((m = TAG_RE.exec(s))) {
+    out += s.slice(last, m.index); last = TAG_RE.lastIndex;
+    const close = m[1] === '/', tag = m[2].toLowerCase();
+    if (tag === 'br') { out += close ? m[0] : '<br>'; continue; }
+    if (m[4] || (close && m[3])) { out += m[0]; continue; }
+    if (!close) { if (stack.length >= 6 || (m[3] && tag !== 'abbr')) { out += m[0]; continue; } stack.push(tag); out += '<' + tag + (m[3] ? m[3].replace('&quot;', '"').replace(/&quot;$/, '"') : '') + '>'; }
+    else if (stack[stack.length - 1] === tag) { stack.pop(); out += '</' + tag + '>'; }
+    else out += m[0];
+  }
+  out += s.slice(last);
+  while (stack.length) out += '</' + stack.pop() + '>';
+  return out;
+}
 function inline(s) {
   const hold = [], codes = [];
   /* code spans first, so a formula such as `=A1*B1*C1` is never touched by bold or italic */
@@ -263,6 +284,7 @@ function inline(s) {
   s = s.replace(/(^|[^\w*)\]$])\*\*\*([^\s*](?:[^*]*[^\s*])?)\*\*\*(?![\w*])/g, '$1<strong><em>$2</em></strong>');
   s = s.replace(/(^|[^\w*)\]$])\*\*([^\s*](?:[^*]*[^\s*])?)\*\*(?![\w*])/g, '$1<strong>$2</strong>');
   s = s.replace(/(^|[^\w*)\]$])\*([^\s*](?:[^*\n]*[^\s*])?)\*(?![\w*])/g, '$1<em>$2</em>');
+  s = allowTags(s);
   s = s.replace(/\u0001(\d+)\u0001/g, (m, i) => '<code>' + esc(codes[+i]) + '</code>');
   s = s.replace(/\u0000(\d+)\u0000/g, (m, i) => esc(hold[+i]));
   s = s.replace(/\u0002(\d+)\u0002/g, (m, i) => window.KVMath.html(maths[+i].tex, maths[+i].display));
@@ -307,7 +329,27 @@ function listBlock(lines, i) {
   const show = (l) => `<${l.type}${l.start ? ' start="' + l.start + '"' : ''}>` + l.items.map((n) => `<li>${inline(n.text)}${n.kids.map(show).join('')}</li>`).join('') + `</${l.type}>`;
   return { html: root.map(show).join(''), next: i };
 }
-const botMd = (t) => { const h = renderMd(t); return REG.hooks.cite ? REG.hooks.cite(h) : h; };
+/* Amani's replies can carry the same blocks as lessons: key idea, compare, example, diagrams. A block or a hint that is still being written
+   is held back (and shown as "Drawing") until its closing line arrives, so half a diagram never flashes on screen. */
+function chatMd(text, live) {
+  const lines = String(text).replace(/\r/g, '').split('\n');
+  let open = -1, det = -1;
+  lines.forEach((l, i) => {
+    if (/^:::\w+/.test(l)) { if (open < 0) open = i; } else if (l.trim() === ':::') open = -1;
+    if (/^\s*<details[\s>]/i.test(l)) { if (det < 0) det = i; }
+    if (/<\/details>/i.test(l)) det = -1;
+  });
+  const cut = open >= 0 && det >= 0 ? Math.min(open, det) : open >= 0 ? open : det;
+  let head = lines, tail = '';
+  if (cut >= 0) {
+    head = lines.slice(0, cut);
+    if (live) tail = '<p class="drawing nofollow" aria-live="polite">Drawing<i>.</i><i>.</i><i>.</i></p>';
+    else head = lines.map((l, i) => (i === cut && /^:::\w+/.test(l) ? '' : l));
+  }
+  const src = head.join('\n');
+  return parseBlocks(src).map((b) => (b.type === 'check' ? '' : blockHtml(b))).join('') + tail;
+}
+const botMd = (t, live) => { const h = chatMd(t, live); return REG.hooks.cite ? REG.hooks.cite(h) : h; };
 function renderMd(text) {
   const lines = String(text).replace(/\r/g, '').split('\n');
   const out = [];
@@ -324,6 +366,16 @@ function renderMd(text) {
       while (code.length && !code[code.length - 1].trim()) code.pop();
       out.push(codeHtml(lang, code.join('\n'))); continue;
     }
+    if (/^\s*<details[\s>]/i.test(l)) {
+      let j = i, done = false; const buf = [];
+      while (j < lines.length) { buf.push(lines[j]); if (/<\/details>/i.test(lines[j])) { done = true; break; } j++; }
+      if (done) {
+        const raw = buf.join('\n'), sm = raw.match(/<summary>([\s\S]*?)<\/summary>/i);
+        const inner = raw.replace(/^\s*<details[^>]*>/i, '').replace(/<summary>[\s\S]*?<\/summary>/i, '').replace(/<\/details>\s*$/i, '').trim();
+        out.push(`<details class="kvd nofollow"><summary>${inline(sm ? sm[1].trim() : 'More')}</summary><div class="in">${renderMd(inner)}</div></details>`);
+        i = j + 1; continue;
+      }
+    }
     if (window.KVMath && /^\s*(\$\$|\\\[)/.test(l)) {
       const open = l.trim().startsWith('$$') ? '$$' : '\\[', close = open === '$$' ? '$$' : '\\]';
       const first = l.trim().slice(open.length), buf = []; let j = i, done = false;
@@ -336,7 +388,7 @@ function renderMd(text) {
       const cap = m[1].trim(), src = m[2];
       /* only pictures packed inside the course are drawn. A web address would need the network and could track the learner. */
       if (/^data:image\/(png|jpeg|webp|svg\+xml);base64,[A-Za-z0-9+\/=]+$/.test(src) && src.length < 400000) {
-        out.push(`<figure class="pic nofollow"><div class="pic-box"><img src="${src}" alt="${esc(cap)}" loading="lazy" decoding="async" data-act="pic-zoom"></div>${cap ? `<figcaption>${inline(cap)}</figcaption>` : ''}</figure>`);
+        out.push(`<figure class="pic nofollow"><div class="pic-box"><img src="${src}" alt="${esc(cap)}" loading="lazy" decoding="async" data-act="pic-zoom" tabindex="0" role="button" aria-label="Open this picture full screen"></div>${cap ? `<figcaption>${inline(cap)}</figcaption>` : ''}</figure>`);
       } else out.push(`<p class="pic-off">[Picture: ${inline(cap)}]</p>`);
       i++; continue;
     }
@@ -357,7 +409,7 @@ function renderMd(text) {
       out.push(`<blockquote class="inset">${inline(q.join(' '))}</blockquote>`); continue;
     }
     const para = [];
-    while (i < lines.length && !isBlank(lines[i]) && !/^(#{1,4}\s|\s*\||\s*```|\s*\$\$|\s*!\[[^\]\n]*\]\([^)\s]+\)\s*$)/.test(lines[i]) && !isListLine(lines[i]) && !/^>\s?/.test(lines[i])) { para.push(lines[i]); i++; }
+    while (i < lines.length && !isBlank(lines[i]) && !/^(#{1,4}\s|\s*\||\s*```|\s*\$\$|\s*<details[\s>]|\s*!\[[^\]\n]*\]\([^)\s]+\)\s*$)/.test(lines[i]) && !isListLine(lines[i]) && !/^>\s?/.test(lines[i])) { para.push(lines[i]); i++; }
     if (!para.length) { para.push(lines[i]); i++; }
     out.push(`<p>${inline(para.join(' '))}</p>`);
   }
@@ -401,29 +453,31 @@ function checkHtml(q, label) {
 }
 
 /* ---------------- Lesson rendering ---------------- */
+/* One lesson block as HTML. Used by lessons and by Amani's chat replies (where quiz questions are left out). */
+function blockHtml(b) {
+  switch (b.type) {
+    case 'md': return renderMd(b.text);
+    case 'keyidea': return `<aside class="keyidea"><div class="ic raised">${ic(I.bulb, 22, 1.8)}</div><div><p class="lbl">Key idea</p><p>${inline(b.text.trim())}</p></div></aside>`;
+    case 'compare': {
+      const g = (k) => { const m = b.text.match(new RegExp('^' + k + ':\\s*(.*)$', 'm')); return m ? m[1] : ''; };
+      return `<div class="compare"><div class="c weak inset"><p class="lbl" style="color:var(--muted)">Weak</p><p>${inline(g('weak'))}</p></div><div class="c strong"><p class="lbl">Strong</p><p>${inline(g('strong'))}</p></div>${g('note') ? `<p class="note">${inline(g('note'))}</p>` : ''}</div>`;
+    }
+    case 'example': {
+      const t = (b.args.match(/title=(.*)$/) || [])[1] || 'Example';
+      return `<div class="example"><p class="lbl">${esc(t)}</p><div class="in">${renderMd(b.text)}</div></div>`;
+    }
+    case 'exercise': {
+      const t = (b.args.match(/title=(.*)$/) || [])[1] || 'Exercise';
+      return `<div class="exercise"><p class="lbl">Your turn: ${esc(t)}</p><div class="in">${renderMd(b.text)}</div></div>`;
+    }
+    case 'check': { const q = qById(b.args.split(/\s+/)[0]); return q ? checkHtml(q) : ''; }
+    case 'figure': return window.KVFig ? window.KVFig.render(b.text) : '';
+    default: return renderMd(b.text);
+  }
+}
 function lessonHtml(l, idx, total) {
   const p = pack();
-  const blocks = parseBlocks(l.body).map((b) => {
-    switch (b.type) {
-      case 'md': return renderMd(b.text);
-      case 'keyidea': return `<aside class="keyidea"><div class="ic raised">${ic(I.bulb, 22, 1.8)}</div><div><p class="lbl">Key idea</p><p>${inline(b.text.trim())}</p></div></aside>`;
-      case 'compare': {
-        const g = (k) => { const m = b.text.match(new RegExp('^' + k + ':\\s*(.*)$', 'm')); return m ? m[1] : ''; };
-        return `<div class="compare"><div class="c weak inset"><p class="lbl" style="color:var(--muted)">Weak</p><p>${inline(g('weak'))}</p></div><div class="c strong"><p class="lbl">Strong</p><p>${inline(g('strong'))}</p></div>${g('note') ? `<p class="note">${inline(g('note'))}</p>` : ''}</div>`;
-      }
-      case 'example': {
-        const t = (b.args.match(/title=(.*)$/) || [])[1] || 'Example';
-        return `<div class="example"><p class="lbl">${esc(t)}</p><div class="in">${renderMd(b.text)}</div></div>`;
-      }
-      case 'exercise': {
-        const t = (b.args.match(/title=(.*)$/) || [])[1] || 'Exercise';
-        return `<div class="exercise"><p class="lbl">Your turn: ${esc(t)}</p><div class="in">${renderMd(b.text)}</div></div>`;
-      }
-      case 'check': { const q = qById(b.args.split(/\s+/)[0]); return q ? checkHtml(q) : ''; }
-      case 'figure': return window.KVFig ? window.KVFig.render(b.text) : '';
-      default: return renderMd(b.text);
-    }
-  }).join('');
+  const blocks = parseBlocks(l.body).map(blockHtml).join('');
   const outs = (l.outcomes || []).length ? `<div class="example" style="border-style:solid"><p class="lbl">By the end of this lesson you can</p><div class="in"><ul>${l.outcomes.map((o) => `<li>${inline(o)}</li>`).join('')}</ul></div></div>` : '';
   const practice = (p.quiz || []).filter((q) => q.lesson === l.id && !q.inline);
   const prac = practice.length ? `<h2 class="nofollow">Practice questions</h2>` + practice.map((q, n) => checkHtml(q, `Practice ${n + 1} of ${practice.length}`)).join('') : '';
@@ -1171,14 +1225,14 @@ function renderTutor() {
 /* Offline models are small and slow, so they get a short, plain prompt: no personality, a trimmed lesson, short answers. Your Amani style comes back on a cloud model. */
 function leanPrompt(ctx) {
   const lesson = ctx.home ? 'The learner is on the home screen of a course. Course outline:\n' : 'The learner is reading this lesson. Answer from it. If the answer is not in it, say so in one short sentence, then help briefly.\nLESSON:\n';
-  return 'You are Amani, a friendly study helper in the Knowvia app. Answer in plain, simple English in under 120 words. Write maths as $x^2$ or $$...$$ and code in backticks. Be accurate and never invent facts, sources, links or page numbers. If asked for a source, say you only know what this lesson says. For a lesson question that is not answered yet, never say which option is right: give a hint and ask one guiding question. If asked to quiz, ask ONE question with options A, B and C. If the learner says "Continue", carry on from where your last answer stopped.\n' + lesson + String(ctx.text || '');
+  return 'You are Amani, a friendly study helper in the Knowvia app. Answer in plain, simple English in under 120 words. Write maths as $x^2$ or $$...$$, and code and spreadsheet formulas in backticks. When a small picture truly helps, you may draw one diagram: a line :::figure, then type: flow, title:, caption:, then rows like - Step | detail, then a line with only :::. Use no other blocks or HTML. Be accurate and never invent facts, sources, links or page numbers. If asked for a source, say you only know what this lesson says. For a lesson question that is not answered yet, never say which option is right: give a hint and ask one guiding question. If asked to quiz, ask ONE question with options A, B and C. If the learner says "Continue", carry on from where your last answer stopped.\n' + lesson + String(ctx.text || '');
 }
 function systemPrompt(ctx) {
   if (S.tutor.brain === 'local') return leanPrompt(ctx);
   const who = 'You are Amani, a study companion inside the learning app Knowvia. ';
   const persona = REG.hooks.persona ? REG.hooks.persona(ctx) : 'Be warm and patient. ';
   const earlier = 'Earlier replies in this chat may have been written by a different model or in a different voice. From now on, always speak as the character above. ';
-  const rules = 'Keep explanations easy to follow. The language, tone and length rules in YOUR CHARACTER above come first. Never invent facts, statistics or sources. Examples in the lesson marked as invented are for practice only. When asked to quiz, ask ONE question with options A, B and C and wait for the reply. SOURCES: never invent a source, page number, link, book, study or quote. Name a source only if it appears in the text you were given. If the learner asks for a source or citation, say the course lists its sources on its Sources page, give only what the text itself names, and otherwise say you do not have one. QUESTIONS AND HINTS: lesson questions that are not yet answered are listed without their answers on purpose. If the learner asks for help with one, never say which option is correct. Give a hint first: point to the part of the lesson it tests and ask one guiding question. If they ask again, give a stronger hint. If they say they give up, walk through the reasoning step by step from the lesson and let them choose. A question they have already answered can be discussed fully. MATHS AND CODE: write maths in LaTeX between dollar signs, $x^2$ inside a sentence and $$...$$ on its own lines for a formula, and put spreadsheet formulas and code in backticks or fenced code blocks. The app draws all of these. Never describe maths as an image.\n' +
+  const rules = 'Keep explanations easy to follow. The language, tone and length rules in YOUR CHARACTER above come first. Never invent facts, statistics or sources. Examples in the lesson marked as invented are for practice only. When asked to quiz, ask ONE question with options A, B and C and wait for the reply. SOURCES: never invent a source, page number, link, book, study or quote. Name a source only if it appears in the text you were given. If the learner asks for a source or citation, say the course lists its sources on its Sources page, give only what the text itself names, and otherwise say you do not have one. QUESTIONS AND HINTS: lesson questions that are not yet answered are listed without their answers on purpose. If the learner asks for help with one, never say which option is correct. Give a hint first: point to the part of the lesson it tests and ask one guiding question. If they ask again, give a stronger hint. If they say they give up, walk through the reasoning step by step from the lesson and let them choose. A question they have already answered can be discussed fully. YOUR TOOLBOX. The app draws all of this in your replies, so use it when it helps the learner understand. Maths: $x^2$ inside a sentence, and $$...$$ on its own lines for a formula. Spreadsheet formulas and code: backticks, or a fenced block with a one-word label such as excel, python or output. Tables, and lists that nest by indenting two spaces. A collapsible hint: <details><summary>Hint</summary>text</details>. Small tags allowed: sub, sup, kbd (for keys such as Ctrl+C), mark, small, u, del, abbr, br. A key idea box: a line :::keyidea, the sentence, then a line with only :::. A weak versus strong box: :::compare with the lines weak:, strong: and note:, closed by a line with only :::. A diagram: a line :::figure, then the lines type:, title: and caption:, then rows that start with "- " and use | between parts, then a line with only :::. Types and rows: flow (- Step | detail), cycle (center: text, then - Step | detail), tree (- Item | detail, indent two spaces per level), bars (unit: text, then - Label | number), versus (left: A, right: B, then - Row | left text | right text), gantt (unit: week, then - Task | start | length), matrix (x: Name | low | high, y: Name | low | high, tl: Title | detail, and tr:, bl:, br:), network (unit: day, then - A | Name | duration | predecessors). Rules: draw a diagram only when a picture teaches faster than words, at most one per reply, and still explain in words. The caption must say what the figure shows. Every number in it must be right, and invented numbers must be labelled invented. Never use any other block name or HTML tag. You cannot show pictures from the web and you cannot attach images. The course\'s own pictures appear in the lesson, and you can refer to them by their captions.\n' +
     'After your answer, add ONE final line in exactly this form: <<next: first idea | second idea | third idea>>. These are things the learner might tap next, written in the learner\'s voice, under 8 words each, and specific to what you just said (a follow-up question, a harder example, or a request to be quizzed). Include a quiz request in most replies. If you just asked a quiz question, give the answer options instead, for example <<next: A | B | C>>. Never mention or explain this line.\n\n';
   if (ctx.home) return who + persona + earlier + 'The learner is on the home screen. They may ask about the course below or about how to study. Answer using the course. If something is not in the course, say so briefly and help from general knowledge, labelled as general knowledge. ' + rules + ctx.text;
   return who + persona + earlier + 'The learner is reading the lesson below. Answer using the lesson. If the answer is not in the lesson, say so in one short sentence, then help from general knowledge and label it as general knowledge. ' + rules +
@@ -1213,7 +1267,7 @@ async function askTutor(shown, prompt, quote) {
   try { const gnd = REG.hooks.ground ? await REG.hooks.ground(prompt || shown, ctx, quote) : ''; if (gnd) payload[0].content += gnd; } catch (e) { /* answer without excerpts */ }
   ctrl = new AbortController();
   const live = () => { const nodes = $$('#msgs .bubble.bot'); return nodes[nodes.length - 1]; };
-  const onChunk = (c) => { raw.v += c; reply.text = visibleText(raw.v); const n = live(); if (n) { n.innerHTML = reply.text ? botMd(reply.text) : '<span class="typing"><i></i><i></i><i></i></span>'; const m = $('#msgs'); if (m) m.scrollTop = m.scrollHeight; } };
+  const onChunk = (c) => { raw.v += c; reply.text = visibleText(raw.v); const n = live(); if (n) { n.innerHTML = reply.text ? botMd(reply.text, true) : '<span class="typing"><i></i><i></i><i></i></span>'; const m = $('#msgs'); if (m) m.scrollTop = m.scrollHeight; } };
   let ok = false;
   try {
     if (S.tutor.brain === 'local') await streamOllama(payload, onChunk, ctrl.signal);
@@ -1793,7 +1847,11 @@ document.addEventListener('click', (ev) => {
     done();
   }
 });
-REG.acts['pic-zoom'] = (t) => { const f = t.closest('figure.pic'); if (f) f.classList.toggle('zoom'); };
+REG.acts['pic-zoom'] = (t) => {
+  const f = t.closest('figure.pic'), img = f && f.querySelector('img'); if (!img) return;
+  const cap = (f.querySelector('figcaption') || {}).textContent || img.alt || '';
+  if (window.KVView) window.KVView.open({ src: img.getAttribute('src'), caption: cap, title: 'Picture' });
+};
 REG.acts['copy-code'] = (t) => {
   const f = t.closest('figure.code'), c = f && f.querySelector('code'); if (!c) return; const txt = c.textContent;
   const ok = () => { toast('Code copied'); t.textContent = 'Copied'; setTimeout(() => { t.textContent = 'Copy'; }, 1600); };
@@ -1850,7 +1908,7 @@ function returnSplash(mode) {
 
 window.KVApp = {
   get S() { return S; }, save, saveNow, $, $$, esc, ic, I, go, goBack, toast, get route() { return route; }, renderScreen, renderTutor, renderTop, PACKS, prog, lessons, pack, lessonById,
-  renderMd, inline, qualityInfo, PROV, PROV_TOP, PROV_ALT, cloudCfg, cloudFetch, localModelList, activeModelName, tutorReady, tutorBudget, lessonContext, lessonQuestions, tutorContext, systemPrompt, showOv, studio, get DESK() { return DESK; }, inline, renderMd, parseBlocks, plainText,
+  renderMd, inline, chatMd, botMd, handleBack, closeTopLayer, qualityInfo, PROV, PROV_TOP, PROV_ALT, cloudCfg, cloudFetch, localModelList, activeModelName, tutorReady, tutorBudget, lessonContext, lessonQuestions, tutorContext, systemPrompt, showOv, studio, get DESK() { return DESK; }, inline, renderMd, parseBlocks, plainText,
   askTutor, chat, clearErrors, afterTutorChange, bestCloud, setLocalModels(l) { ollamaModels = (l || []).slice(); }, isNative, llm, switchToOffline, applyTheme, resolvedTheme, sleep, shuffle, get version() { return APP_VERSION; }, get busy() { return busy; },
   openTutor() { tutorOpen = true; renderTop(); renderTutor(); },
   openProvider(id) { cloudOpen = id; go('me'); setTimeout(() => { const e = document.querySelector('[data-p="' + id + '"]'); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'center' }); }, 350); },
