@@ -1125,24 +1125,60 @@ function splitNext(raw) {
   return { text: raw.slice(0, i).trim(), next: next.slice(0, 4) };
 }
 const POOL_L = ['Quiz me on this', 'Give me another example', 'Explain it simpler', 'Why does this matter?', 'Sum it up in 3 points', 'What mistake do people make here?', 'How would I use this?', 'Test me with a harder one'];
-const POOL_H = ['Quiz me on this course', 'How do I study this?', 'What should I learn first?', 'Give me a study tip', 'What will I be able to do?'];
-const QUIZ_RE = /^(quiz|test) me/i;
-function fallbackSugg(ctx, text) {
-  if (/(^|\n)\s*\**A[).:]\**\s.+\n[\s\S]*\bB[).:]/.test(text) && /\?/.test(text)) return ['A', 'B', 'C', 'Give me a hint'];
-  const n = S.sugN = (S.sugN || 0) + 1, pool = ctx && ctx.home ? POOL_H : POOL_L;
-  const rest = pool.filter((x) => !QUIZ_RE.test(x)), pick = [];
-  for (let k = 0; pick.length < 2 && k < rest.length; k++) pick.push(rest[(n * 2 + k * 3) % rest.length]);
-  const uniq = Array.from(new Set(pick));
-  return ensureQuiz(uniq.length >= 2 ? uniq : rest.slice(0, 2), ctx, n);
+const POOL_H = ['How do I study this?', 'What should I learn first?', 'Give me a study tip', 'What will I be able to do?'];
+const QUIZ_RE = /^(quiz|test) me/i, QUIZ_ANY = /\bquiz\b|test me|test my/i;
+/* What does the learner want from this message? The answer shapes both the reply and the chips under it. */
+function intentOf(text, quote) {
+  const t = String(text || '').trim().toLowerCase(), words = t.split(/\s+/).filter(Boolean).length;
+  if (/^[a-d]$/.test(t)) return 'answer';
+  if (/\bquiz\b|^test me|test (me|my)\b|practice (question|problem)s?|give me (a |an )?(question|problem|test)|ask me (a )?question/.test(t)) return 'quiz';
+  if (/\bhint\b|i give up|\bstuck\b/.test(t)) return 'help';
+  if (/^(thanks|thank you|thx|ok|okay|cool|nice|great|good|got it|alright|hi|hello|hey|wow|lol)\b[\s!.]*$/.test(t) || words <= 2 && /^(thanks|thank you|ok|okay|cool|nice|great|hi|hello|hey)/.test(t)) return 'chat';
+  if (/\b(mean|meaning|define|definition|stands? for|synonym|pronounce|what is a|what's a|what is an|what's an)\b/.test(t) && words <= 14 || (quote && String(quote).trim().split(/\s+/).length <= 3 && /what|meaning|mean/.test(t))) return 'define';
+  if (/don'?t understand|do not understand|\bconfus|\blost\b|too hard|too difficult|i still don'?t|doesn'?t make sense|explain (it |this )?(simpler|again|differently|like)|simply|\beasier\b|eli5|plain words/.test(t)) return 'confused';
+  if (/\bexamples?\b|for instance|use case|in a sentence|show me how/.test(t)) return 'example';
+  if (/sum(mari[sz]e| it up)|recap|tl;?dr|key points|main points|in \d points/.test(t)) return 'summary';
+  if (/how (do|should|can) i (study|learn|revise|start|prepare)|study (plan|tip|schedule)|where (do|should) i start|what should i learn|revision/.test(t)) return 'study';
+  if (/\bsolve\b|calculate|work out|step by step|how do i (do|solve|find|work)|what is the answer|find the (value|sum|product|area|lcm|hcf)/.test(t)) return 'solve';
+  if (/difference between|\bcompare\b|\bvs\b|versus/.test(t)) return 'compare';
+  return words <= 4 ? 'other' : 'explain';
 }
-function ensureQuiz(list, ctx, n) {
-  const hasQ = list.some((x) => QUIZ_RE.test(x));
-  if (hasQ || /^[A-C]$/.test(list[0] || '')) return list.slice(0, 4);
-  n = n || S.sugN || 1;
-  /* quiz help comes up in two of every three suggestion sets */
-  if (n % 3 === 0) return list.slice(0, 3);
-  const q = ctx && ctx.home ? 'Quiz me on this course' : 'Quiz me on this';
-  return [q].concat(list.slice(0, 2));
+const QUIZ_OK = { explain: 1, summary: 1, other: 0 };
+const HINTS = {
+  define: 'The learner wants the meaning of a word or phrase. Give the meaning in one or two plain sentences and one short example sentence. Then stop. Do not ask a quiz or test question and do not add extra sections.',
+  example: 'Give one or two clear, concrete examples, each in a sentence or two, and stop. Do not quiz.',
+  confused: 'The learner is confused. Slow down, use simpler words, and go one small step at a time with a tiny example. Do not quiz.',
+  chat: 'Reply in one or two warm sentences. Do not quiz and do not teach anything new unless asked.',
+  summary: 'Keep it short: a few clear points. Do not quiz.',
+  study: 'Give practical study advice in a few short steps. Do not quiz.',
+  solve: 'Show the working step by step, explaining each step in a few words, then give the answer. Do not quiz.',
+  compare: 'Compare them clearly in a few lines, ideally with one concrete example. Do not quiz.',
+  help: 'Give a hint, not the answer, as the lesson rules say.',
+  explain: 'Explain clearly and stop. Do not end with a quiz question unless the learner asked for one.',
+  other: 'Answer briefly. Do not quiz.'
+};
+const POOLS = {
+  define: ['Give another example', 'Use it in a sentence', 'Where is it used here?', 'Explain it even simpler'],
+  example: ['Give another example', 'Explain it simpler', 'Why does this matter?', 'Show a common mistake'],
+  confused: ['Explain it another way', 'Give a simple example', 'Break it into steps', 'What should I focus on?'],
+  summary: ['Explain the first point', 'Give an example', 'What is the hardest part?'],
+  study: ['Make me a simple plan', 'What should I learn first?', 'How long will this take?'],
+  solve: ['Try a similar one', 'Explain the first step again', 'Show a common mistake'],
+  compare: ['Give an example of each', 'Which is easier to remember?', 'Explain it simpler'],
+  other: ['Explain it simpler', 'Give an example', 'Why does this matter?'],
+  explain: ['Give me another example', 'Explain it simpler', 'Why does this matter?', 'How would I use this?', 'What mistake do people make here?']
+};
+/* chips for the next tap. A quiz offer only after a real explanation or summary, and only now and then. */
+function suggestFor(intent, sp, ctx) {
+  const n = S.sugN = (S.sugN || 0) + 1;
+  if (intent === 'chat') return [];
+  if (/(^|\n)\s*\**A[).:]\**\s.+\n[\s\S]*\bB[).:]/.test(sp.text) && /\?/.test(sp.text)) return ['A', 'B', 'C', 'Give me a hint'];
+  const quizOk = !!QUIZ_OK[intent] && n % 3 === 1, home = ctx && ctx.home;
+  let list = (sp.next || []).filter((x) => quizOk || !QUIZ_ANY.test(x));
+  if (list.length < 2) { const pool = (home && intent === 'explain' ? POOL_H : POOLS[intent] || POOLS.other).filter((x) => quizOk || !QUIZ_ANY.test(x)); list = list.concat(pool.filter((x) => !list.includes(x))).slice(0, 3); }
+  if (intent === 'quiz' && !list.some((x) => QUIZ_ANY.test(x))) list = ['Another question'].concat(list);
+  if (quizOk && !list.some((x) => QUIZ_ANY.test(x))) list = [home ? 'Quiz me on this course' : 'Quiz me on this'].concat(list.slice(0, 2));
+  return list.slice(0, 4);
 }
 function chipsHtml(ctx) {
   const list = SUGG[chatKey()] || (ctx.home ? ['How do I study this?', 'What will I learn?', 'Study tips'] : ['Explain simpler', 'Give an example', 'Quiz me']);
@@ -1240,15 +1276,15 @@ function renderTutor() {
 /* Offline models are small and slow, so they get a short, plain prompt: no personality, a trimmed lesson, short answers. Your Amani style comes back on a cloud model. */
 function leanPrompt(ctx) {
   const lesson = ctx.home ? 'The learner is on the home screen of a course. Course outline:\n' : 'The learner is reading this lesson. Answer from it. If the answer is not in it, say so in one short sentence, then help briefly.\nLESSON:\n';
-  return 'You are Amani, a friendly study helper in the Knowvia app. Answer in plain, simple English in under 120 words. Write maths as $x^2$ or $$...$$, and code and spreadsheet formulas in backticks. When a small picture truly helps, you may draw one diagram: a line :::figure, then type: flow, title:, caption:, then rows like - Step | detail, then a line with only :::. Use no other blocks or HTML. Be accurate and never invent facts, sources, links or page numbers. If asked for a source, say you only know what this lesson says. For a lesson question that is not answered yet, never say which option is right: give a hint and ask one guiding question. If asked to quiz, ask ONE question with options A, B and C. If the learner says "Continue", carry on from where your last answer stopped.\n' + lesson + String(ctx.text || '');
+  return 'You are Amani, a friendly study helper in the Knowvia app. Answer in plain, simple English in under 120 words. Write maths as $x^2$ or $$...$$, and code and spreadsheet formulas in backticks. When a small picture truly helps, you may draw one diagram: a line :::figure, then type: flow, title:, caption:, then rows like - Step | detail, then a line with only :::. Use no other blocks or HTML. Be accurate and never invent facts, sources, links or page numbers. If asked for a source, say you only know what this lesson says. For a lesson question that is not answered yet, never say which option is right: give a hint and ask one guiding question. If asked to quiz, ask ONE question with options A, B and C. Answer only what was asked. Never add a quiz question on your own. If the learner says "Continue", carry on from where your last answer stopped.\n' + lesson + String(ctx.text || '');
 }
 function systemPrompt(ctx) {
   if (S.tutor.brain === 'local') return leanPrompt(ctx);
   const who = 'You are Amani, a study companion inside the learning app Knowvia. ';
   const persona = REG.hooks.persona ? REG.hooks.persona(ctx) : 'Be warm and patient. ';
   const earlier = 'Earlier replies in this chat may have been written by a different model or in a different voice. From now on, always speak as the character above. ';
-  const rules = 'Keep explanations easy to follow. The language, tone and length rules in YOUR CHARACTER above come first. Never invent facts, statistics or sources. Examples in the lesson marked as invented are for practice only. When asked to quiz, ask ONE question with options A, B and C and wait for the reply. SOURCES: never invent a source, page number, link, book, study or quote. Name a source only if it appears in the text you were given. If the learner asks for a source or citation, say the course lists its sources on its Sources page, give only what the text itself names, and otherwise say you do not have one. QUESTIONS AND HINTS: lesson questions that are not yet answered are listed without their answers on purpose. If the learner asks for help with one, never say which option is correct. Give a hint first: point to the part of the lesson it tests and ask one guiding question. If they ask again, give a stronger hint. If they say they give up, walk through the reasoning step by step from the lesson and let them choose. A question they have already answered can be discussed fully. YOUR TOOLBOX. The app draws all of this in your replies, so use it when it helps the learner understand. Maths: $x^2$ inside a sentence, and $$...$$ on its own lines for a formula. Spreadsheet formulas and code: backticks, or a fenced block with a one-word label such as excel, python or output. Tables, and lists that nest by indenting two spaces. A collapsible hint: <details><summary>Hint</summary>text</details>. Small tags allowed: sub, sup, kbd (for keys such as Ctrl+C), mark, small, u, del, abbr, br. A key idea box: a line :::keyidea, the sentence, then a line with only :::. A weak versus strong box: :::compare with the lines weak:, strong: and note:, closed by a line with only :::. A diagram: a line :::figure, then the lines type:, title: and caption:, then rows that start with "- " and use | between parts, then a line with only :::. Types and rows: flow (- Step | detail), cycle (center: text, then - Step | detail), tree (- Item | detail, indent two spaces per level), bars (unit: text, then - Label | number), versus (left: A, right: B, then - Row | left text | right text), gantt (unit: week, then - Task | start | length), matrix (x: Name | low | high, y: Name | low | high, tl: Title | detail, and tr:, bl:, br:), network (unit: day, then - A | Name | duration | predecessors). Rules: draw a diagram only when a picture teaches faster than words, at most one per reply, and still explain in words. The caption must say what the figure shows. Every number in it must be right, and invented numbers must be labelled invented. Never use any other block name or HTML tag. You cannot show pictures from the web and you cannot attach images. The course\'s own pictures appear in the lesson, and you can refer to them by their captions.\n' +
-    'After your answer, add ONE final line in exactly this form: <<next: first idea | second idea | third idea>>. These are things the learner might tap next, written in the learner\'s voice, under 8 words each, and specific to what you just said (a follow-up question, a harder example, or a request to be quizzed). Include a quiz request in most replies. If you just asked a quiz question, give the answer options instead, for example <<next: A | B | C>>. Never mention or explain this line.\n\n';
+  const rules = 'Keep explanations easy to follow. The language, tone and length rules in YOUR CHARACTER above come first. Never invent facts, statistics or sources. Examples in the lesson marked as invented are for practice only. When asked to quiz, ask ONE question with options A, B and C and wait for the reply. Only quiz when the learner asks to be quizzed or is answering a quiz. Never end an answer with a test question on your own: answer what was asked, then stop. A short question deserves a short answer. SOURCES: never invent a source, page number, link, book, study or quote. Name a source only if it appears in the text you were given. If the learner asks for a source or citation, say the course lists its sources on its Sources page, give only what the text itself names, and otherwise say you do not have one. QUESTIONS AND HINTS: lesson questions that are not yet answered are listed without their answers on purpose. If the learner asks for help with one, never say which option is correct. Give a hint first: point to the part of the lesson it tests and ask one guiding question. If they ask again, give a stronger hint. If they say they give up, walk through the reasoning step by step from the lesson and let them choose. A question they have already answered can be discussed fully. YOUR TOOLBOX. The app draws all of this in your replies, so use it when it helps the learner understand. Maths: $x^2$ inside a sentence, and $$...$$ on its own lines for a formula. Spreadsheet formulas and code: backticks, or a fenced block with a one-word label such as excel, python or output. Tables, and lists that nest by indenting two spaces. A collapsible hint: <details><summary>Hint</summary>text</details>. Small tags allowed: sub, sup, kbd (for keys such as Ctrl+C), mark, small, u, del, abbr, br. A key idea box: a line :::keyidea, the sentence, then a line with only :::. A weak versus strong box: :::compare with the lines weak:, strong: and note:, closed by a line with only :::. A diagram: a line :::figure, then the lines type:, title: and caption:, then rows that start with "- " and use | between parts, then a line with only :::. Types and rows: flow (- Step | detail), cycle (center: text, then - Step | detail), tree (- Item | detail, indent two spaces per level), bars (unit: text, then - Label | number), versus (left: A, right: B, then - Row | left text | right text), gantt (unit: week, then - Task | start | length), matrix (x: Name | low | high, y: Name | low | high, tl: Title | detail, and tr:, bl:, br:), network (unit: day, then - A | Name | duration | predecessors). Rules: draw a diagram only when a picture teaches faster than words, at most one per reply, and still explain in words. The caption must say what the figure shows. Every number in it must be right, and invented numbers must be labelled invented. Never use any other block name or HTML tag. You cannot show pictures from the web and you cannot attach images. The course\'s own pictures appear in the lesson, and you can refer to them by their captions.\n' +
+    'After your answer, add ONE final line in exactly this form: <<next: first idea | second idea | third idea>>. These are things the learner might tap next, written in the learner\'s voice, under 8 words each, and specific to what you just said, such as another example, a simpler explanation, how it is used, or a harder case. Offer to be quizzed only when the learner has just worked through something substantial or asked to practise. Never offer a quiz after a word meaning, a quick fact or a short question. If you just asked a quiz question, give the answer options instead, for example <<next: A | B | C>>. Never mention or explain this line.\n\n';
   if (ctx.home) return who + persona + earlier + 'The learner is on the home screen. They may ask about the course below or about how to study. Answer using the course. If something is not in the course, say so briefly and help from general knowledge, labelled as general knowledge. ' + rules + ctx.text;
   return who + persona + earlier + 'The learner is reading the lesson below. Answer using the lesson. If the answer is not in the lesson, say so in one short sentence, then help from general knowledge and label it as general knowledge. ' + rules +
     'THE LESSON ON SCREEN (Lesson ' + ctx.n + ' of the course "' + pack().title + '"):\n' + ctx.text;
@@ -1270,7 +1306,7 @@ async function askTutor(shown, prompt, quote, pic) {
   stopSpeak(); mdlOpen = false;
   const key = chatKey(), msgs = chat();
   clearErrors(msgs);
-  const um = { role: 'user', text: shown }, reply = { role: 'tutor', text: '' }, raw = { v: '' };
+  const intent = intentOf(prompt || shown, quote), um = { role: 'user', text: shown }, reply = { role: 'tutor', text: '' }, raw = { v: '' };
   if (pic) um.pic = pic.cap;
   const origPrompt = prompt;
   if (quote) { um.quote = quote; prompt = 'The learner selected this passage: "' + quote + '"\nTheir request about it: ' + (prompt || shown) + '\nAnswer about that passage specifically, using the lesson for context.'; }
@@ -1280,6 +1316,7 @@ async function askTutor(shown, prompt, quote, pic) {
   const history = msgs.slice(0, -2).filter((m) => m.text).slice(offline ? -4 : -8).map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: (m.quote ? '[Selected passage: "' + m.quote.slice(0, 300) + '"] ' : '') + (offline ? m.text.slice(0, 700) : m.text) }));
   const remind = !offline && REG.hooks.personaReminder ? REG.hooks.personaReminder() : '';
   const payload = [{ role: 'system', content: systemPrompt(ctx) }].concat(history, [{ role: 'user', content: (prompt || shown) + remind }]);
+  if (!offline && HINTS[intent]) payload[0].content += '\n\nTHIS REPLY: ' + HINTS[intent];
   let picCand = null;
   if (pic) {
     const cands = window.KVSources.vision.candidates(); picCand = cands[0] || null;
@@ -1297,7 +1334,7 @@ async function askTutor(shown, prompt, quote, pic) {
     const sp = splitNext(raw.v);
     reply.text = sp.text;
     if (!reply.text.trim()) throw new Error('empty');
-    SUGG[key] = (sp.next.length >= 2 ? ensureQuiz(sp.next, ctx) : fallbackSugg(ctx, sp.text)).slice(0, 4);
+    SUGG[key] = suggestFor(intent, sp, ctx);
     if (offline && lastCut) SUGG[key] = ['Continue'].concat(SUGG[key].filter((x) => x !== 'Continue')).slice(0, 4);
     ok = true;
     if (REG.hooks.netOk) REG.hooks.netOk();
@@ -1933,7 +1970,7 @@ function returnSplash(mode) {
 
 window.KVApp = {
   get S() { return S; }, save, saveNow, $, $$, esc, ic, I, go, goBack, toast, get route() { return route; }, renderScreen, renderTutor, renderTop, PACKS, prog, lessons, pack, lessonById,
-  renderMd, inline, chatMd, botMd, handleBack, closeTopLayer, attachPicture, qualityInfo, PROV, PROV_TOP, PROV_ALT, cloudCfg, cloudFetch, localModelList, activeModelName, tutorReady, tutorBudget, lessonContext, lessonQuestions, tutorContext, systemPrompt, showOv, studio, get DESK() { return DESK; }, inline, renderMd, parseBlocks, plainText,
+  renderMd, inline, chatMd, botMd, handleBack, closeTopLayer, attachPicture, intentOf, suggestFor, qualityInfo, PROV, PROV_TOP, PROV_ALT, cloudCfg, cloudFetch, localModelList, activeModelName, tutorReady, tutorBudget, lessonContext, lessonQuestions, tutorContext, systemPrompt, showOv, studio, get DESK() { return DESK; }, inline, renderMd, parseBlocks, plainText,
   askTutor, chat, clearErrors, afterTutorChange, bestCloud, setLocalModels(l) { ollamaModels = (l || []).slice(); }, isNative, llm, switchToOffline, applyTheme, resolvedTheme, sleep, shuffle, get version() { return APP_VERSION; }, get busy() { return busy; },
   openTutor() { tutorOpen = true; renderTop(); renderTutor(); },
   openProvider(id) { cloudOpen = id; go('me'); setTimeout(() => { const e = document.querySelector('[data-p="' + id + '"]'); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'center' }); }, 350); },
