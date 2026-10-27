@@ -64,7 +64,7 @@ function closeOv() { const o = ov(); if (o) o.remove(); IMP.running = false; IMP
 function stepper() { const cur = STAGES.findIndex((s) => s[0] === IMP.stage); return `<ul class="of-stages">${STAGES.map(([id, nm], i) => { const st = i < cur || IMP.stage === 'done' ? 'done' : i === cur ? 'now' : 'wait'; return `<li class="${st}">${st === 'done' ? ic(A().I.check, 14, 2.8) : '<i></i>'}${esc(nm)}</li>`; }).join('')}</ul>`; }
 function ovBody() {
   const k = IMP.kind;
-  if (IMP.running) return `<h3>Adding your source</h3><p class="help" id="imp-msg">${esc(IMP.msg || 'Starting')}</p>${stepper()}<div class="bar"><i id="imp-bar" style="width:${Math.round((IMP.frac || 0) * 100)}%"></i></div><p class="help" id="imp-eta">${Math.round((IMP.frac || 0) * 100)}%${IMP.eta ? ' · ' + etaTxt(IMP.eta) : ''}</p><p class="help">Keep the app open. Everything is read on this device. Nothing is uploaded.</p><div class="row-actions"><button class="btn" data-act="src-cancel">Cancel</button></div>`;
+  if (IMP.running) return `<h3>Adding your source</h3><p class="help" id="imp-msg">${esc(IMP.msg || 'Starting')}</p>${stepper()}<div class="bar"><i id="imp-bar" style="width:${Math.round((IMP.frac || 0) * 100)}%"></i></div><p class="help" id="imp-eta">${Math.round((IMP.frac || 0) * 100)}%${IMP.eta ? ' · ' + etaTxt(IMP.eta) : ''}</p><p class="help">Keep the app open. ${IMP.kind === 'photos' || STAGES === STAGES_PH || /photo/i.test(IMP.msg || '') ? 'Your photos are sent to your cloud model so it can read the pages. They are not shared with anyone else.' : 'Everything is read on this device. Nothing is uploaded.'}</p><div class="row-actions"><button class="btn" data-act="src-cancel">Cancel</button></div>`;
   if (IMP.err) return `<h3>This could not be added</h3><p class="help">${esc(IMP.err)}</p><div class="row-actions"><button class="btn primary" data-act="src-retry">Try again</button>${/cloud model/.test(IMP.err) ? '<button class="btn" data-act="nav" data-r="me">Set up a cloud model</button>' : ''}<button class="btn" data-act="src-close">Close</button></div>`;
   if (k === 'file') return `<h3>Add a file</h3><div class="dropz inset" data-act="src-pick" role="button" tabindex="0"><span class="ico">${ic(IC.file, 28, 1.7)}</span><b>Choose a file</b><span class="s">or drop it here</span></div>
     <p class="help"><b>Works with:</b> PDF, Word (.docx), PowerPoint (.pptx), Excel (.xlsx), EPUB books, text, Markdown, CSV and saved web pages (.html).</p>
@@ -183,7 +183,7 @@ REG.acts['vis-page'] = (t, d) => visRun(d.id, [+d.n]);
 REG.acts['vis-chapter'] = async (t, d) => { const src = await K().Store.get(d.id); if (!src) return; const nums = []; for (let i = +d.from; i <= +d.to; i++) if (K().needsRead(src, src.units[i - 1])) nums.push(i); if (nums.length) visRun(d.id, nums); };
 REG.acts['vis-show'] = async (t, d) => {
   const box = document.getElementById('pgimg'); if (!box) return; box.innerHTML = '<p class="help"><span class="spin"></span>&nbsp;Opening the page</p>';
-  try { const u = await K().pageImage(d.id, +d.n); box.innerHTML = `<img class="pgimg" alt="The original page" src="${u}">`; } catch (e) { box.innerHTML = `<p class="help">${esc((e && e.message) || 'The page could not be shown.')}</p>`; }
+  try { const u = await K().pageImage(d.id, +d.n); box.innerHTML = `<img class="pgimg" alt="The original page. Tap to open it full screen." src="${u}" data-act="pg-zoom" data-title="Original page" tabindex="0" role="button" style="cursor:zoom-in">`; } catch (e) { box.innerHTML = `<p class="help">${esc((e && e.message) || 'The page could not be shown.')}</p>`; }
 };
 REG.acts['vis-reattach'] = () => { const f = document.getElementById('src-reattach'); if (f) f.click(); };
 async function reattach(id, f) {
@@ -204,6 +204,48 @@ function visPanel(src) {
   return `<section class="vis pn-strong"><h3>Page images</h3>${lines.join('')}${btns.length ? `<div class="row-actions">${btns.join('')}</div>` : ''}<input type="file" id="src-reattach" data-id="${esc(src.id)}" accept=".pdf" hidden></section>`;
 }
 
+/* ---------------- Pictures kept from a source: drawn from this device, tap for full screen ---------------- */
+const picFig = (sid, v, cap) => `<figure class="pic nofollow kvsrc"><div class="pic-box"><img data-kvsrc="${esc(sid)}:${esc(v.id)}" alt="${esc(cap)}" loading="lazy" decoding="async" data-act="pic-zoom" tabindex="0" role="button" aria-label="Open this picture full screen"></div><figcaption>${esc(cap)}</figcaption></figure>`;
+function picsHtml(src, n) {
+  const vs = K().visIn(src, n, n); if (!vs.length) return '';
+  return `<div class="srcpics"><p class="help">${vs.length === 1 ? 'A picture' : vs.length + ' pictures'} from this ${esc(unitWord(src.kind, 1))}. Tap to open full screen.</p>${vs.map((v) => picFig(src.id, v, K().visCaption(src, v))).join('')}</div>`;
+}
+let hydQ = 0;
+function hydrate() {
+  cancelAnimationFrame(hydQ); hydQ = requestAnimationFrame(() => {
+    document.querySelectorAll('img[data-kvsrc]:not([data-kvok])').forEach((img) => {
+      img.dataset.kvok = '1'; const [sid, vid] = String(img.dataset.kvsrc).split(':');
+      K().visUrl(sid, vid).then((u) => { if (u) img.src = u; else gone(img); }).catch(() => gone(img));
+    });
+  });
+}
+function gone(img) { const f = img.closest('figure'), cap = img.alt || 'A picture'; if (f) f.outerHTML = `<p class="pic-off">[Picture: ${esc(cap)}] (this picture is no longer on this device)</p>`; }
+try { new MutationObserver(hydrate).observe(document.documentElement, { childList: true, subtree: true }); } catch (e) { /* older browsers show the labels only */ }
+REG.acts['pg-zoom'] = (t) => { if (window.KVView && t && t.src) window.KVView.open({ src: t.src, caption: t.dataset.cap || '', title: t.dataset.title || 'Original page' }); };
+REG.acts['src-orig'] = async (t, d) => {
+  const a = A(), from = +d.from, to = Math.min(+d.to, from + 7); let ov = null;
+  try {
+    const parts = []; for (let n = from; n <= to; n++) parts.push([n, await K().pageImage(d.id, n, 1200)]);
+    const src = await K().Store.get(d.id), name = (n) => esc((src.units[n - 1] || {}).cite || 'page ' + n);
+    if (parts.length === 1) ov = window.KVView.open({ src: parts[0][1], caption: 'Original ' + ((src.units[from - 1] || {}).cite || 'page') + ' of your source.', title: 'Original page', ask: true });
+    else ov = window.KVView.openHtml({ title: 'Original pages', html: parts.map(([n, u]) => `<figure style="margin:0 0 14px"><img src="${u}" alt="Original ${name(n)}" style="width:100%;display:block"><figcaption class="help">Original ${name(n)}</figcaption></figure>`).join('') + (+d.to > to ? `<p class="help">Showing the first 8 pages. Open the source to see the rest.</p>` : '') });
+  } catch (e) { a.toast((e && e.message) || 'The original page could not be shown.'); }
+  return ov;
+};
+REG.acts['src-descpics'] = async (t, d) => {
+  const a = A(), p = a.PACKS.find((x) => x.id === d.p), l = p && a.lessonById(d.l); if (!l || !l.src || PREP.key) return;
+  const src = await K().Store.get(p.source.id); const want = K().visIn(src, l.src.from, l.src.to).filter((v) => !v.desc).slice(0, 12).map((v) => v.id); if (!want.length) return;
+  PREP.key = p.id + ':' + l.id; PREP.ctrl = new AbortController(); PREP.step = 1; PREP.msg = 'Looking at ' + want.length + (want.length === 1 ? ' picture' : ' pictures'); PREP.err = ''; PREP.note = ''; PREP.pct = 0; paintPrep();
+  try {
+    await K().describeVisuals(src.id, want, { signal: PREP.ctrl.signal, onProgress: (q) => { PREP.msg = q.msg; PREP.pct = q.frac; paintPrep(); } });
+    const fresh = await K().Store.get(src.id); let body = String(l.body || '');
+    body = body.replace(/^(!\[)([^\]\n]*)(\]\(kvsrc:[\w-]+:(v\d+)\))$/gm, (m, a1, cap, rest, id) => { const v = (fresh.vis || []).find((x) => x.id === id); return v && v.desc && /^A picture from /.test(cap) ? a1 + K().visCaption(fresh, v).replace(/[\[\]()\n]/g, ' ') + rest : m; });
+    if (body !== l.body) { l.body = body; await window.KVStore.save(p); a.addPack(p); }
+    a.toast('Pictures described');
+  } catch (e) { if (!(e && (e.name === 'Cancelled' || e.name === 'AbortError'))) a.toast((e && e.message) || 'The pictures could not be described.'); }
+  PREP.key = ''; PREP.ctrl = null; PREP.step = 0; PREP.pct = null; const r = a.route; if (r.name === 'lesson') a.renderScreen();
+};
+
 /* ---------------- One source: overview and page reader ---------------- */
 const loading = (id) => { K().Store.get(id).then(() => { const r = A().route; if (r.name === 'source' && r.id === id) A().renderScreen(); }).catch(() => {}); };
 function readerFix(src, u, n, ch) {
@@ -222,7 +264,7 @@ function reader(src, n) {
   return `<div class="page reader"><div class="sheet pn-strong"><div class="hair"></div><article class="prose">
     <p class="eyebrow">${esc(src.title)}${ch ? ' · ' + esc(ch.title) : ''}</p><h1>${esc(word)}: ${esc(u.cite.replace(/^p\. |^photo /, ''))}</h1>
     ${readerFix(src, u, n, ch)}
-    <div class="srctext">${t}</div>
+    ${picsHtml(src, n)}<div class="srctext">${t}</div>
     ${u.v ? '<p class="help srcnote">Read from the page image by Amani. For exact formulas, check the original page.</p>' : ''}
     ${(src.kind === 'pdf' || src.kind === 'photo') && src.hasFile ? `<div class="row-actions"><button class="btn sm" data-act="vis-show" data-id="${src.id}" data-n="${n}">${ic(IC.photo, 16, 2)}Show the original page</button></div><div id="pgimg"></div>` : ''}
     <div class="lesson-nav"><button class="btn" data-act="nav" data-r="source/${src.id}/${Math.max(1, n - 1)}" ${n <= 1 ? 'disabled' : ''}>Previous</button>${yt}<button class="btn" data-act="nav" data-r="source/${src.id}">Back to source</button><button class="btn primary" data-act="nav" data-r="source/${src.id}/${Math.min(src.units.length, n + 1)}" ${n >= src.units.length ? 'disabled' : ''}>Next</button></div>
@@ -283,12 +325,29 @@ function lessonPrompt(src, l, text, hasMath) {
     '- After a statement that comes from a page, write that page label exactly as it appears in the source, in square brackets, like [p. 4.52]. Use only labels that appear in the source.\n- Use ## headings and put 3 to 6 key terms in **bold**.\n' +
     '- Include one block ":::keyidea" (one or two sentences), at least one worked example from the source as ":::example title=Name", and one ":::exercise title=Name" with a task for the learner. A block is a line starting with ::: and its type, then the text, then a line containing only :::.\n' +
     (hasMath ? '- Pages marked [MATHS MAY BE GARBLED] have unreadable matrices, fractions or symbols. Do not guess them. Explain the idea in words and tell the learner to check that page in the book.\n' : '') +
+    (/\[Picture v\d+ /.test(text) ? '- The source has pictures, listed at the end as [Picture v1 on slide 2: label]. You cannot see them. Where one supports a point, put it on its own line right after that paragraph as ![what it shows](kvsrc:v1), using only ids that are listed and each at most once. Describe a picture only with the words in its label, and say so when a label is missing. Never invent what a picture shows.\n' : '') +
     '- If this part is mostly exercises, teach how to approach each type of question and solve the clearest examples step by step.\n- Write 500 to 900 words, or less if the source is short. No introductions about yourself.';
   return [{ role: 'system', content: sys }, { role: 'user', content: 'SOURCE TEXT:\n\n' + text }];
 }
-function sourceText(src, a, b) { return src.units.slice(a - 1, b).map((u) => '[' + u.cite + ']' + (u.m ? ' [MATHS MAY BE GARBLED]' : '') + '\n' + u.t).join('\n\n'); }
+function sourceText(src, a, b) {
+  let t = src.units.slice(a - 1, b).map((u) => '[' + u.cite + ']' + (u.m ? ' [MATHS MAY BE GARBLED]' : '') + '\n' + u.t).join('\n\n');
+  const vs = K().visIn(src, a, b);
+  if (vs.length) t += '\n\nPICTURES IN THIS PART (you cannot see them, you only know these labels):\n' + vs.slice(0, 12).map((v) => '[Picture ' + v.id + ' on ' + K().visLabel(src, v) + ': ' + (String(v.desc || v.alt || '').replace(/\s+/g, ' ').slice(0, 300) || 'no description') + ']').join('\n');
+  return t;
+}
+/* the model may place a picture with ![what it shows](kvsrc:v3). Only real pictures of this part are kept, each once. If it placed none, the first few are added at the end. */
+function placeVisuals(out, src, a, b) {
+  const vs = K().visIn(src, a, b); if (!vs.length) return out.replace(/^[ \t]*!\[[^\]\n]*\]\(kvsrc:[^)]*\)[ \t]*$/gm, '');
+  const ok = new Set(vs.map((v) => v.id)), used = new Set(), clip = (c) => String(c).replace(/[\[\]()\n]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
+  out = out.replace(/^[ \t]*!\[([^\]\n]*)\]\(kvsrc:(?:[\w-]+:)?(v\d+)\)[ \t]*$/gm, (m, cap, id) => {
+    if (!ok.has(id) || used.has(id)) return ''; used.add(id); const v = vs.find((x) => x.id === id), c = clip(cap);
+    return '![' + (c.length >= 12 ? c : clip(K().visCaption(src, v))) + '](kvsrc:' + src.id + ':' + id + ')';
+  });
+  if (!used.size) out += '\n\n## Pictures from your source\n\n' + vs.slice(0, 6).map((v) => '![' + clip(K().visCaption(src, v)) + '](kvsrc:' + src.id + ':' + v.id + ')').join('\n\n');
+  return out.replace(/\n{3,}/g, '\n\n');
+}
 function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
-async function prepare(packId, lessonId) {
+async function prepare(packId, lessonId, describe) {
   const a = A(), p = a.PACKS.find((x) => x.id === packId); if (!p || PREP.key) return;
   const l = p.modules.reduce((x, m) => x.concat(m.lessons), []).find((x) => x.id === lessonId); if (!l || !l.src) return;
   const src = await K().Store.get(p.source.id); if (!src) { PREP.err = 'The source is no longer on this device.'; paintPrep(); return; }
@@ -307,6 +366,15 @@ async function prepare(packId, lessonId) {
         PREP.pct = null;
       }
     }
+    if (describe) {
+      const want = K().visIn(src, l.src.from, l.src.to).filter((v) => !v.desc).slice(0, 12).map((v) => v.id);
+      if (want.length) {
+        PREP.step = 1; PREP.msg = 'Looking at ' + want.length + (want.length === 1 ? ' picture' : ' pictures'); PREP.pct = 0; paintPrep();
+        try { await K().describeVisuals(src.id, want, { signal: PREP.ctrl.signal, onProgress: (p) => { PREP.msg = p.msg; PREP.pct = p.frac; paintPrep(); } }); }
+        catch (e) { if (e && (e.name === 'Cancelled' || e.name === 'AbortError')) throw Object.assign(new Error('stopped'), { name: 'AbortError' }); PREP.note = (e && e.message ? e.message + ' ' : '') + 'The lesson uses the pictures\' own labels instead.'; }
+        PREP.pct = null;
+      }
+    }
     const hasMath = src.units.slice(l.src.from - 1, l.src.to).some((u) => u.m);
     PREP.step = 1; PREP.msg = 'Amani is reading ' + src.units[l.src.from - 1].cite + ' to ' + src.units[l.src.to - 1].cite; paintPrep();
     const text = sourceText(src, l.src.from, l.src.to);
@@ -314,7 +382,7 @@ async function prepare(packId, lessonId) {
     while (tries < 2) { tries++; out = String(await a.llm(lessonPrompt(src, l, text, hasMath), { model: cloudSel(), max: 3000, temp: 0.4, signal: PREP.ctrl.signal })); if (out.replace(/\s+/g, ' ').length > 500) break; }
     if (out.replace(/\s+/g, ' ').length < 300) throw new Error('The model returned too little text.');
     PREP.step = 2; PREP.msg = 'Writing practice questions'; paintPrep();
-    out = out.replace(/```[a-z]*\n?/g, '').trim(); const tm = out.match(/^#\s+(.+)$/m); let title = l.title; if (tm) { title = tm[1].replace(/[*_`]/g, '').trim().slice(0, 90); out = out.replace(tm[0], '').trim(); }
+    out = placeVisuals(out.replace(/```[a-z]*\n?/g, '').trim(), src, l.src.from, l.src.to); const tm = out.match(/^#\s+(.+)$/m); let title = l.title; if (tm) { title = tm[1].replace(/[*_`]/g, '').trim().slice(0, 90); out = out.replace(tm[0], '').trim(); }
     if (!/:::keyidea/.test(out)) out += '\n\n:::keyidea\n' + (title || 'Review the main idea above.') + '\n:::';
     let qz = { quiz: [], cards: [] };
     try {
@@ -336,15 +404,18 @@ async function prepare(packId, lessonId) {
 }
 function prepHtml(l, p) {
   const a = A(), r = l.src, key = p.id + ':' + l.id, busy = PREP.key === key;
-  if (l.ready) return `<p class="help srcfrom">Written from <b>${esc(l.subtitle)}</b> of your source. <button class="linkbtn" data-act="src-open" data-id="${esc(p.source.id)}" data-n="${r.from}">Read the original pages</button></p>`;
+  const sx = K().Store.peek(p.source.id), nv = sx ? K().visIn(sx, r.from, r.to).length : 0, nd = sx ? K().visIn(sx, r.from, r.to).filter((v) => !v.desc).length : 0;
+  const paged = sx && (sx.kind === 'pdf' || sx.kind === 'photo') && sx.hasFile;
+  if (l.ready) return `<p class="help srcfrom">Written from <b>${esc(l.subtitle)}</b> of your source. <button class="linkbtn" data-act="src-open" data-id="${esc(p.source.id)}" data-n="${r.from}">Read the original text</button>${paged ? ` <button class="linkbtn" data-act="src-orig" data-id="${esc(p.source.id)}" data-from="${r.from}" data-to="${r.to}">View the original ${r.to > r.from ? 'pages' : 'page'}</button>` : ''}${nd && K().vision.info().ok ? ` <button class="linkbtn" data-act="src-descpics" data-p="${esc(p.id)}" data-l="${esc(l.id)}">Describe ${nd} ${nd === 1 ? 'picture' : 'pictures'} with a cloud model</button>` : ''}</p>`;
   if (busy) return `<section class="prep pn-strong" id="prep-card"><h3>Preparing this lesson</h3><p class="help">${esc(PREP.msg)}</p><div class="bar"><i style="width:${PREP.step === 2 ? 80 : PREP.pct != null ? Math.round(5 + PREP.pct * 30) : 40}%"></i></div>${PREP.note ? `<p class="help">${esc(PREP.note)}</p>` : ''}<p class="help">A few minutes at most, depending on the model. You can keep this open.</p><div class="row-actions"><button class="btn" data-act="src-prep-cancel">Cancel</button></div></section>`;
   if (PREP.key) return `<section class="prep pn-strong" id="prep-card"><h3>Another lesson is being prepared</h3><p class="help">Wait for it to finish, then prepare this one.</p></section>`;
   if (!cloudOk()) return `<section class="prep pn-strong" id="prep-card"><h3>Prepare this lesson</h3><p class="help">Writing a lesson from your source needs a <b>cloud model</b>. Offline models are for chat only: they are too small and slow to write lessons. Your tutor chat can still use the offline model.</p><div class="row-actions"><button class="btn primary" data-act="nav" data-r="me">Set up a cloud model</button><button class="btn" data-act="src-open" data-id="${esc(p.source.id)}" data-n="${r.from}">Read the original pages</button></div></section>`;
-  return `<section class="prep pn-strong" id="prep-card">${PREP.err ? `<p class="help prep-err">${esc(PREP.err)}</p>` : ''}<h3>Prepare this lesson</h3><p class="help">Amani will read <b>${esc(l.subtitle)}</b> of your source and write a lesson with key ideas, worked examples, practice questions and flashcards. It stays on this device.</p><div class="row-actions"><button class="btn primary" data-act="src-prep" data-p="${esc(p.id)}" data-l="${esc(l.id)}">${ic(a.I.spark, 18, 2)}Prepare this lesson</button><button class="btn" data-act="src-open" data-id="${esc(p.source.id)}" data-n="${r.from}">Read the original pages</button></div></section>`;
+  return `<section class="prep pn-strong" id="prep-card">${PREP.err ? `<p class="help prep-err">${esc(PREP.err)}</p>` : ''}<h3>Prepare this lesson</h3><p class="help">Amani will read <b>${esc(l.subtitle)}</b> of your source and write a lesson with key ideas, worked examples, practice questions and flashcards. It stays on this device.</p>${nv ? `<p class="help">This part has <b>${nv}</b> ${nv === 1 ? 'picture' : 'pictures'}. They appear in the lesson with their own labels. <b>Prepare and describe</b> also sends ${nv === 1 ? 'it' : 'them'} to your cloud model so Amani can say what ${nv === 1 ? 'it shows' : 'they show'}. Nothing is sent unless you press that button.</p>` : ''}<div class="row-actions"><button class="btn primary" data-act="src-prep" data-p="${esc(p.id)}" data-l="${esc(l.id)}"> ${ic(a.I.spark, 18, 2)}Prepare this lesson</button>${nd && K().vision.info().ok ? `<button class="btn" data-act="src-prep" data-desc="1" data-p="${esc(p.id)}" data-l="${esc(l.id)}">Prepare and describe ${nd} ${nd === 1 ? 'picture' : 'pictures'}</button>` : ''}<button class="btn" data-act="src-open" data-id="${esc(p.source.id)}" data-n="${r.from}">Read the original pages</button></div></section>`;
 }
 function paintPrep() { const a = A(), r = a.route; if (r.name !== 'lesson') return; const el = document.getElementById('prep-card') || document.querySelector('.srcfrom'); const p = a.pack(), l = a.lessonById(r.id); if (!el || !l || !l.src) return; const h = prepHtml(l, p), t = document.createElement('div'); t.innerHTML = h; if (t.firstElementChild) el.replaceWith(t.firstElementChild); }
 REG.hooks.lessonExtra = ((prev) => (l) => { const a = A(), p = a.pack(), x = prev ? prev(l) : ''; return x + (p && p.source && l.src ? prepHtml(l, p) : ''); })(REG.hooks.lessonExtra);
-REG.acts['src-prep'] = (t, d) => { prepare(d.p, d.l); };
+window.KVSrcUI = { placeVisuals, sourceText, lessonPrompt, picsHtml };
+REG.acts['src-prep'] = (t, d) => { prepare(d.p, d.l, d.desc === '1'); };
 REG.acts['src-prep-cancel'] = () => { if (PREP.ctrl) PREP.ctrl.abort(); };
 
 /* ---------------- Grounded answers: find passages, hand them to the tutor, turn page labels into links ---------------- */

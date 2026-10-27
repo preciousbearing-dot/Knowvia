@@ -387,7 +387,11 @@ function renderMd(text) {
     if ((m = l.match(/^\s*!\[([^\]\n]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)\s*$/))) {
       const cap = m[1].trim(), src = m[2];
       /* only pictures packed inside the course are drawn. A web address would need the network and could track the learner. */
-      if (/^data:image\/(png|jpeg|webp|svg\+xml);base64,[A-Za-z0-9+\/=]+$/.test(src) && src.length < 400000) {
+      const ks = src.match(/^kvsrc:(s[a-z0-9]{4,24}):(v\d{1,3})$/);
+      if (ks) {
+        /* a picture kept from the learner's own source: drawn from this device after the page is built, never from the web */
+        out.push(`<figure class="pic nofollow kvsrc"><div class="pic-box"><img data-kvsrc="${ks[1]}:${ks[2]}" alt="${esc(cap)}" loading="lazy" decoding="async" data-act="pic-zoom" tabindex="0" role="button" aria-label="Open this picture full screen"></div>${cap ? `<figcaption>${inline(cap)}</figcaption>` : ''}</figure>`);
+      } else if (/^data:image\/(png|jpeg|webp|svg\+xml);base64,[A-Za-z0-9+\/=]+$/.test(src) && src.length < 400000) {
         out.push(`<figure class="pic nofollow"><div class="pic-box"><img src="${src}" alt="${esc(cap)}" loading="lazy" decoding="async" data-act="pic-zoom" tabindex="0" role="button" aria-label="Open this picture full screen"></div>${cap ? `<figcaption>${inline(cap)}</figcaption>` : ''}</figure>`);
       } else out.push(`<p class="pic-off">[Picture: ${inline(cap)}]</p>`);
       i++; continue;
@@ -634,7 +638,7 @@ setInterval(() => { if (S.theme === 'frost' && S.night) applyTheme(); }, 300000)
 
 /* ---------------- Shell ---------------- */
 let tutorOpen = window.innerWidth >= 1180;
-let chipsOpen = true, tutorFull = false, attached = '', attachedKey = '';
+let chipsOpen = true, tutorFull = false, attached = '', attachedKey = '', attachedPic = null, lastPic = null;
 const NAV = [['home', 'Home', I.home], ['learn', 'Learn', I.book], ['library', 'Library', I.lib], ['practice', 'Practice', I.prac], ['progress', 'Progress', I.prog]];
 function shell() {
   const rail = NAV.map(([k, n, d]) => `<button class="rail-btn" data-act="nav" data-r="${k}" data-nav="${k}">${ic(d)}${n}</button>`).join('') +
@@ -1106,7 +1110,7 @@ const SUGG = {};
 function netErr(e) { const m = (e && e.message) || String(e); return !navigator.onLine || /Failed to fetch|NetworkError|getaddrinfo|HTTP 502|HTTP 504|Load failed|ECONN|timed out|network/i.test(m); }
 function canGoOffline() { return !!(localModelList().length && S.tutor.brain === 'cloud'); }
 function msgHtml(m, i) {
-  if (m.role === 'user') return `<div class="bubble user">${m.quote ? `<blockquote class="uq">${esc(m.quote.length > 220 ? m.quote.slice(0, 220) + '…' : m.quote)}</blockquote>` : ''}<span>${esc(m.text)}</span></div>`;
+  if (m.role === 'user') return `<div class="bubble user">${m.quote ? `<blockquote class="uq">${esc(m.quote.length > 220 ? m.quote.slice(0, 220) + '…' : m.quote)}</blockquote>` : ''}${m.pic ? `<span class="upic">${ic(I.photo || I.quote, 14, 2)} Picture shown: ${esc(m.pic.length > 90 ? m.pic.slice(0, 90) + '…' : m.pic)}</span>` : ''}<span>${esc(m.text)}</span></div>`;
   if (m.err) return `<div class="bubble bot raised err" role="alert">${renderMd(m.text)}<div class="erract"><button class="btn sm primary" data-act="retryask">${ic(I.refresh, 16, 2)}Try again</button>${canGoOffline() ? '<button class="btn sm" data-act="useoffline">Use the offline tutor</button>' : ''}<button class="btn sm" data-act="nav" data-r="me">Tutor settings</button><button class="btn sm" data-act="errdismiss">Dismiss</button></div></div>`;
   const listen = m.text && canSpeakNow() ? `<button class="listen" data-act="listen" data-i="${i}" aria-label="Listen to this answer" title="Listen">${ic(I.speaker, 16, 1.9)}</button>` : '';
   return `<div class="bubble bot raised">${m.text ? botMd(m.text) : '<span class="typing"><i></i><i></i><i></i></span>'}${listen}</div>`;
@@ -1187,6 +1191,17 @@ function attachText(txt) {
   renderTop(); renderTutor();
   setTimeout(() => { const i = $('#tin'); if (i) i.focus({ preventScroll: true }); }, 60);
 }
+/* A picture can be shown to Amani. It stays on this device until the learner presses send, and it is sent to a cloud model that can see pictures only for that one question. */
+function attachPicture(o) {
+  if (!o || !o.src) return false;
+  const vi = window.KVSources && window.KVSources.vision ? window.KVSources.vision.info() : { ok: false };
+  if (!vi.ok) { toast('To show Amani a picture, connect a cloud model that can see images (Gemini is free). Open Me, then Cloud tutors.'); return false; }
+  attachedPic = { src: o.src, cap: String(o.caption || 'A picture').slice(0, 300), by: vi.name }; attached = ''; attachedKey = chatKey(); tutorOpen = true;
+  renderTop(); renderTutor();
+  setTimeout(() => { const i = $('#tin'); if (i) i.focus({ preventScroll: true }); }, 60);
+  return true;
+}
+const toDataUrl = async (src) => { if (/^data:/.test(src)) return src; const b = await (await fetch(src)).blob(); return await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(new Error('read')); r.readAsDataURL(b); }); };
 function renderTutor() {
   const el = $('#tutor'), fab = $('#fab'), scrim = $('#scrim'), isL = tutorRoute();
   const narrow = window.innerWidth < 860;
@@ -1194,7 +1209,7 @@ function renderTutor() {
   el.hidden = !open; fab.hidden = !(isL && !open && narrow); scrim.hidden = !(open && (narrow || window.innerWidth < 1180));
   el.classList.toggle('thinking', !!busy);
   if (!open) { tutorFull = false; el.classList.remove('full'); document.documentElement.classList.remove('tfull'); return; }
-  if (attachedKey !== chatKey()) { attached = ''; attachedKey = chatKey(); }
+  if (attachedKey !== chatKey()) { attached = ''; attachedPic = null; attachedKey = chatKey(); }
   el.classList.toggle('full', tutorFull); document.documentElement.classList.toggle('tfull', tutorFull);
   const keep = ($('#tin') || {}).value || '', hadFocus = !!($('#tin') && document.activeElement === $('#tin'));
   const ctx = tutorContext(), t = S.tutor;
@@ -1210,9 +1225,9 @@ function renderTutor() {
     <div class="msgs" id="msgs" aria-live="polite">${msgs.length ? msgs.map(msgHtml).join('') : `<p class="bubble bot raised">${hello}</p>`}</div>
     <div class="qwrap ${chipsOpen && !busy ? 'open' : ''} ${busy ? 'busy' : ''}" id="qwrap"><div class="qbox"><div class="qclip"><div class="quick" id="quick">${busy ? '' : chipsHtml(ctx)}</div></div></div>${qFab()}</div>
     <form class="t-input" id="tform">
-      ${attached ? `<div class="attach" id="attach">${ic(I.quote, 18, 1.9)}<div class="aq"><b>Asking about</b><span>${esc(attached.length > 160 ? attached.slice(0, 160) + '…' : attached)}</span></div><button type="button" class="btn icon sm" data-act="unattach" aria-label="Remove the attached text">${ic(I.close, 16, 2.2)}</button></div>` : ''}
+      ${attachedPic ? `<div class="attach" id="attach"><img class="apic" alt="" src="${esc(attachedPic.src)}"><div class="aq"><b>Showing Amani a picture</b><span>${esc(attachedPic.cap.length > 120 ? attachedPic.cap.slice(0, 120) + '…' : attachedPic.cap)}</span><small class="pnote">Goes to ${esc(attachedPic.by)} (cloud) only when you press send. Tap the cross to keep it here.</small></div><button type="button" class="btn icon sm" data-act="unattach" aria-label="Remove the picture">${ic(I.close, 16, 2.2)}</button></div>` : ''}${attached ? `<div class="attach" id="attach">${ic(I.quote, 18, 1.9)}<div class="aq"><b>Asking about</b><span>${esc(attached.length > 160 ? attached.slice(0, 160) + '…' : attached)}</span></div><button type="button" class="btn icon sm" data-act="unattach" aria-label="Remove the attached text">${ic(I.close, 16, 2.2)}</button></div>` : ''}
       <button type="button" class="mdl-btn" data-act="mdl" aria-label="Choose the model Amani uses" aria-haspopup="menu" aria-expanded="${mdlOpen}">${ic(I.spark, 20, 1.9)}<span class="cv">${ic(I.down, 16, 2.2)}</span></button>
-      <input id="tin" aria-label="${ctx.home ? 'Ask Amani' : 'Ask about this lesson'}" placeholder="${attached ? 'Type what you want to know about it' : ctx.home ? 'Ask Amani anything' : 'Ask about this lesson'}" autocomplete="off">
+      <input id="tin" aria-label="${ctx.home ? 'Ask Amani' : 'Ask about this lesson'}" placeholder="${attached || attachedPic ? 'Type what you want to know about it' : ctx.home ? 'Ask Amani anything' : 'Ask about this lesson'}" autocomplete="off">
       ${busy ? `<button type="button" class="btn primary send" data-act="stop" aria-label="Stop">${ic(I.stop, 18, 2)}</button>` : `<button type="submit" class="btn primary send" aria-label="Send">${ic(I.send, 20, 2)}</button>`}
       ${mdlOpen ? `<div class="mdl-menu pn-strong" id="mdlmenu" role="menu" aria-label="Available models">${menuHtml()}</div>` : ''}</form>
     <p class="t-status" id="t-status"><span class="dot" style="background:${t.brain === 'local' ? 'var(--ok)' : 'var(--accent-text)'}"></span>${statusLine()}</p>`;
@@ -1249,13 +1264,14 @@ const QUICK = {
 };
 const CHIP_MAP = { 'Explain simpler': 'simple', 'Give an example': 'example', 'Quiz me': 'quiz', 'How do I study this?': 'plan', 'What will I learn?': 'learn', 'Study tips': 'tips' };
 function clearErrors(msgs) { for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i].err || msgs[i].failed) msgs.splice(i, 1); }
-async function askTutor(shown, prompt, quote) {
+async function askTutor(shown, prompt, quote, pic) {
   if (busy) return;
   const ctx = tutorContext(); if (!ctx) return;
   stopSpeak(); mdlOpen = false;
   const key = chatKey(), msgs = chat();
   clearErrors(msgs);
   const um = { role: 'user', text: shown }, reply = { role: 'tutor', text: '' }, raw = { v: '' };
+  if (pic) um.pic = pic.cap;
   const origPrompt = prompt;
   if (quote) { um.quote = quote; prompt = 'The learner selected this passage: "' + quote + '"\nTheir request about it: ' + (prompt || shown) + '\nAnswer about that passage specifically, using the lesson for context.'; }
   msgs.push(um); msgs.push(reply);
@@ -1264,13 +1280,19 @@ async function askTutor(shown, prompt, quote) {
   const history = msgs.slice(0, -2).filter((m) => m.text).slice(offline ? -4 : -8).map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: (m.quote ? '[Selected passage: "' + m.quote.slice(0, 300) + '"] ' : '') + (offline ? m.text.slice(0, 700) : m.text) }));
   const remind = !offline && REG.hooks.personaReminder ? REG.hooks.personaReminder() : '';
   const payload = [{ role: 'system', content: systemPrompt(ctx) }].concat(history, [{ role: 'user', content: (prompt || shown) + remind }]);
+  let picCand = null;
+  if (pic) {
+    const cands = window.KVSources.vision.candidates(); picCand = cands[0] || null;
+    if (picCand) { try { const url = await toDataUrl(pic.src); payload[payload.length - 1].content = [{ type: 'text', text: (prompt || shown) + remind + '\nThe learner is showing you the picture attached below. Its label says: "' + pic.cap + '". Look at the picture itself and answer about what it actually shows. If you cannot make something out, say so instead of guessing.' }, { type: 'image_url', image_url: { url } }]; } catch (e) { picCand = null; } }
+  }
   try { const gnd = REG.hooks.ground ? await REG.hooks.ground(prompt || shown, ctx, quote) : ''; if (gnd) payload[0].content += gnd; } catch (e) { /* answer without excerpts */ }
   ctrl = new AbortController();
   const live = () => { const nodes = $$('#msgs .bubble.bot'); return nodes[nodes.length - 1]; };
   const onChunk = (c) => { raw.v += c; reply.text = visibleText(raw.v); const n = live(); if (n) { n.innerHTML = reply.text ? botMd(reply.text, true) : '<span class="typing"><i></i><i></i><i></i></span>'; const m = $('#msgs'); if (m) m.scrollTop = m.scrollHeight; } };
   let ok = false;
   try {
-    if (S.tutor.brain === 'local') await streamOllama(payload, onChunk, ctrl.signal);
+    if (pic) { if (!picCand) throw new Error('The picture could not be sent. Connect a cloud model that can see images in Me, then try again.'); onChunk(String(await window.KVApp.llm(payload, { model: picCand, max: 1800, temp: 0.4, signal: ctrl.signal, fast: true }))); }
+    else if (S.tutor.brain === 'local') await streamOllama(payload, onChunk, ctrl.signal);
     else await streamCloud(payload, onChunk, ctrl.signal);
     const sp = splitNext(raw.v);
     reply.text = sp.text;
@@ -1282,7 +1304,7 @@ async function askTutor(shown, prompt, quote) {
   } catch (e) {
     if (e && e.name === 'AbortError') { const sp = splitNext(raw.v); if (sp.text) { reply.text = sp.text; } else { msgs.splice(msgs.length - 2, 2); } }
     else {
-      um.failed = true; reply.err = true; reply.retry = { shown, prompt: origPrompt, quote: quote };
+      um.failed = true; reply.err = true; if (pic) lastPic = pic; reply.retry = { shown, prompt: origPrompt, quote: quote, hadPic: !!pic };
       reply.net = netErr(e); um.net = reply.net;
       reply.text = (e && e.message === 'empty') ? 'The model sent an empty answer. Try again, or pick another model from the menu beside the text box.' : errText(e);
       if (netErr(e) && S.tutor.brain === 'cloud' && REG.hooks.netFail) REG.hooks.netFail();
@@ -1721,7 +1743,7 @@ document.addEventListener('click', (ev) => {
     case 'tutor': tutorOpen = !tutorOpen; if (!tutorOpen) tutorFull = false; renderTop(); renderTutor(); break;
     case 'tfull': setFull(!tutorFull); break;
     case 'qtoggle': setChips(!chipsOpen); break;
-    case 'unattach': attached = ''; renderTutor(); setTimeout(() => { const i = $('#tin'); if (i) i.focus({ preventScroll: true }); }, 30); break;
+    case 'unattach': attached = ''; attachedPic = null; renderTutor(); setTimeout(() => { const i = $('#tin'); if (i) i.focus({ preventScroll: true }); }, 30); break;
     case 'brain': S.tutor.brain = d.v; save(); renderTutor(); if (route.name === 'me') renderScreen(); break;
     case 'quick': { const q = QUICK[d.k]; askTutor(q[0], q[1]); break; }
     case 'chip': {
@@ -1732,7 +1754,7 @@ document.addEventListener('click', (ev) => {
       else askTutor(tx, tx);
       break;
     }
-    case 'retryask': { const msgs = chat(), i = msgs.findIndex((m) => m.err); if (i < 0) break; const r = msgs[i].retry || {}; msgs.splice(Math.max(0, i - 1), 2); renderTutor(); askTutor(r.shown || '', r.prompt || r.shown || '', r.quote); break; }
+    case 'retryask': { const msgs = chat(), i = msgs.findIndex((m) => m.err); if (i < 0) break; const r = msgs[i].retry || {}; msgs.splice(Math.max(0, i - 1), 2); renderTutor(); askTutor(r.shown || '', r.prompt || r.shown || '', r.quote, r.hadPic ? lastPic : null); break; }
     case 'errdismiss': { clearErrors(chat()); save(); renderTutor(); break; }
     case 'useoffline': if (REG.hooks.switchOffline) REG.hooks.switchOffline(); break;
     case 'listen': speak(+d.i); break;
@@ -1776,12 +1798,12 @@ document.addEventListener('change', (ev) => {
 document.addEventListener('submit', (ev) => {
   if (ev.target.id !== 'tform') return;
   ev.preventDefault();
-  const i = $('#tin'); let v = i.value.trim(); const q = attached;
-  if (!v && !q) return;
-  if (!v) v = 'Explain this simply';
-  i.value = ''; attached = '';
+  const i = $('#tin'); let v = i.value.trim(); const q = attached, pic = attachedPic;
+  if (!v && !q && !pic) return;
+  if (!v) v = pic ? 'What does this picture show, and what should I learn from it?' : 'Explain this simply';
+  i.value = ''; attached = ''; attachedPic = null;
   i.blur(); /* close the keyboard so the answer and the new suggestions are fully visible */
-  askTutor(v, v, q);
+  askTutor(v, v, q, pic);
 });
 document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && tutorFull) { setFull(false); return; } if (ev.key === 'Escape' && tutorOpen && route.name === 'lesson' && window.innerWidth < 1180) { tutorOpen = false; renderTutor(); renderTop(); } });
 document.addEventListener('scroll', (ev) => { if (ev.target && ev.target.id === 'scroll') onScroll(); }, true);
@@ -1850,7 +1872,7 @@ document.addEventListener('click', (ev) => {
 REG.acts['pic-zoom'] = (t) => {
   const f = t.closest('figure.pic'), img = f && f.querySelector('img'); if (!img) return;
   const cap = (f.querySelector('figcaption') || {}).textContent || img.alt || '';
-  if (window.KVView) window.KVView.open({ src: img.getAttribute('src'), caption: cap, title: 'Picture' });
+  if (window.KVView) window.KVView.open({ src: img.getAttribute('src'), caption: cap, title: 'Picture', ask: true });
 };
 REG.acts['copy-code'] = (t) => {
   const f = t.closest('figure.code'), c = f && f.querySelector('code'); if (!c) return; const txt = c.textContent;
@@ -1908,7 +1930,7 @@ function returnSplash(mode) {
 
 window.KVApp = {
   get S() { return S; }, save, saveNow, $, $$, esc, ic, I, go, goBack, toast, get route() { return route; }, renderScreen, renderTutor, renderTop, PACKS, prog, lessons, pack, lessonById,
-  renderMd, inline, chatMd, botMd, handleBack, closeTopLayer, qualityInfo, PROV, PROV_TOP, PROV_ALT, cloudCfg, cloudFetch, localModelList, activeModelName, tutorReady, tutorBudget, lessonContext, lessonQuestions, tutorContext, systemPrompt, showOv, studio, get DESK() { return DESK; }, inline, renderMd, parseBlocks, plainText,
+  renderMd, inline, chatMd, botMd, handleBack, closeTopLayer, attachPicture, qualityInfo, PROV, PROV_TOP, PROV_ALT, cloudCfg, cloudFetch, localModelList, activeModelName, tutorReady, tutorBudget, lessonContext, lessonQuestions, tutorContext, systemPrompt, showOv, studio, get DESK() { return DESK; }, inline, renderMd, parseBlocks, plainText,
   askTutor, chat, clearErrors, afterTutorChange, bestCloud, setLocalModels(l) { ollamaModels = (l || []).slice(); }, isNative, llm, switchToOffline, applyTheme, resolvedTheme, sleep, shuffle, get version() { return APP_VERSION; }, get busy() { return busy; },
   openTutor() { tutorOpen = true; renderTop(); renderTutor(); },
   openProvider(id) { cloudOpen = id; go('me'); setTimeout(() => { const e = document.querySelector('[data-p="' + id + '"]'); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'center' }); }, 350); },

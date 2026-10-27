@@ -1119,3 +1119,19 @@ details.kvd>.in{padding:2px 0 10px}
 @keyframes kvblink{0%,60%,100%{opacity:.2}30%{opacity:1}}
 .bubble .keyidea{margin:10px 0}
 .bubble .fig{margin:10px 0}
+
+/* pictures kept from a learner's own source */
+.prose figure.pic.kvsrc img:not([src]){min-height:120px;width:100%;background:linear-gradient(90deg,#eee 25%,#f7f7f7 50%,#eee 75%);background-size:200% 100%;animation:kvsk 1.2s linear infinite;border-radius:8px}
+@keyframes kvsk{to{background-position:-200% 0}}
+.srcpics{margin:6px 0 14px}
+.pic-off{color:var(--muted);font-size:.9em}
+.attach .apic{width:44px;height:44px;object-fit:cover;border-radius:8px;flex:none;background:#fff}
+.bubble.user .upic{display:block;font-size:.8em;opacity:.85;margin-bottom:4px}
+img.pgimg[data-act]{cursor:zoom-in}
+
+.attach .aq .pnote{font:500 12px/1.35 var(--fu);color:var(--muted)}
+.attach .aq span{-webkit-line-clamp:2}
+.kv-view-bar{flex-wrap:wrap;row-gap:6px}
+.kv-view-tools{flex-wrap:wrap;justify-content:flex-end}
+.kv-view-tools{flex:1 1 100%;gap:5px;justify-content:space-between}
+.kv-view-tools .btn.sm{padding-left:11px;padding-right:11px}

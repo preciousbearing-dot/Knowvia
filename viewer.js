@@ -35,10 +35,10 @@
   function shell(inner, o) {
     close(true);
     const ov = document.createElement('div'); ov.id = 'kv-view'; ov.className = 'ov kv-view'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-modal', 'true'); ov.setAttribute('aria-label', o.title || 'Enlarged view');
-    ov.innerHTML = `<div class="kv-view-card"><div class="kv-view-bar"><b class="kv-view-title">${esc(o.title || '')}</b><span class="kv-view-tools"><button type="button" class="btn sm" data-act="view-out" aria-label="Zoom out">-</button><span class="kv-view-z" aria-live="polite">100%</span><button type="button" class="btn sm" data-act="view-in" aria-label="Zoom in">+</button><button type="button" class="btn sm" data-act="view-fit">Fit</button><button type="button" class="btn sm primary" data-act="view-close">Close</button></span></div>` +
+    ov.innerHTML = `<div class="kv-view-card"><div class="kv-view-bar"><b class="kv-view-title">${esc(o.title || '')}</b><span class="kv-view-tools"><button type="button" class="btn sm" data-act="view-out" aria-label="Zoom out">-</button><span class="kv-view-z" aria-live="polite">100%</span><button type="button" class="btn sm" data-act="view-in" aria-label="Zoom in">+</button><button type="button" class="btn sm" data-act="view-fit">Fit</button>${o.ask ? '<button type="button" class="btn sm" data-act="view-ask">Ask Amani</button>' : ''}<button type="button" class="btn sm primary" data-act="view-close">Close</button></span></div>` +
       `<div class="kv-view-body" tabindex="0">${inner}</div>${o.caption ? `<p class="kv-view-cap">${esc(o.caption)}</p>` : ''}</div>`;
     document.body.appendChild(ov);
-    st = { z: 100, from: document.activeElement };
+    st = { z: 100, from: document.activeElement, o };
     wire(ov.querySelector('.kv-view-body'));
     const c = ov.querySelector('[data-act="view-close"]'); if (c) c.focus();
     setZoom(100);
@@ -66,6 +66,7 @@
     REG.acts['view-in'] = () => st && setZoom(st.z * 1.4);
     REG.acts['view-out'] = () => st && setZoom(st.z / 1.4);
     REG.acts['view-fit'] = () => st && setZoom(100);
+    REG.acts['view-ask'] = () => { const o = st && st.o; if (!o || !o.src) return; const ap = window.KVApp && window.KVApp.attachPicture; if (!ap) return; if (ap({ src: o.src, caption: o.caption || o.title })) close(true); };
   }
   window.KVView = { open, openHtml, close, zoom: (z) => st && setZoom(z), level: () => (st ? st.z : 0) };
 })();

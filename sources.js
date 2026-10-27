@@ -50,6 +50,7 @@ const Store = {
   getFile: (id) => idb('readonly', (st) => st.get('file:' + id)),
   putImg: (id, n, blob) => idb('readwrite', (st) => st.put(blob, 'img:' + id + ':' + n)),
   getImg: (id, n) => idb('readonly', (st) => st.get('img:' + id + ':' + n)),
+  removeImgs: (id, prefix) => idb('readwrite', (st) => st.delete(IDBKeyRange.bound('img:' + id + ':' + prefix, 'img:' + id + ':' + prefix + '\uffff'))),
   async remove(id) {
     try { await idb('readwrite', (st) => { st.delete('file:' + id); return st.delete(IDBKeyRange.bound('img:' + id + ':', 'img:' + id + ':\uffff')); }); } catch (e) { /* ignore */ }
     try { await idb('readwrite', (st) => st.delete(id)); } catch (e) { /* ignore */ } cache.delete(id); IDX.delete(id); closeDoc(id); listWrite(listRead().filter((x) => x.id !== id));
@@ -95,6 +96,62 @@ async function unzip(buf) {
 const xml = (s, type) => new DOMParser().parseFromString(s, type || 'application/xml');
 const byTag = (root, ns, name) => Array.from(root.getElementsByTagNameNS('*', name));
 
+/* ---------------- Pictures inside Word, PowerPoint and Excel files ---------------- */
+const VIS_MAX = 40, VIS_BYTES = 400 * 1024, VIS_TOTAL = 12 * 1048576, VIS_SIDE = 1400, VIS_MIN_SIDE = 90, VIS_MIN_BYTES = 800;
+const IMG_EXT = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp' };
+const RNS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+const relId = (el) => el.getAttributeNS(RNS, 'embed') || el.getAttribute('r:embed') || '';
+function relPath(base, target) {
+  if (!target || /^[a-z]+:/i.test(target)) return '';
+  if (target.charAt(0) === '/') return target.slice(1);
+  const parts = base.split('/'); parts.pop();
+  target.split('/').forEach((p) => { if (p === '..') parts.pop(); else if (p && p !== '.') parts.push(p); });
+  return parts.join('/');
+}
+async function readRels(z, relFile) {
+  const x = await z.text(relFile), m = {}; if (!x) return m;
+  byTag(xml(x), '', 'Relationship').forEach((r) => { m[r.getAttribute('Id')] = { t: r.getAttribute('Target') || '', ty: r.getAttribute('Type') || '' }; });
+  return m;
+}
+function hashBytes(u8) { let h = 2166136261; const step = Math.max(1, (u8.length / 2048) | 0); for (let i = 0; i < u8.length; i += step) { h ^= u8[i]; h = Math.imul(h, 16777619); } return (h >>> 0).toString(36) + ':' + u8.length; }
+async function shrinkVisual(u8, mime) {
+  let bmp = null; const blob = new Blob([u8], { type: mime });
+  try { bmp = await createImageBitmap(blob); } catch (e) { bmp = null; }
+  if (!bmp) return null;
+  const w = bmp.width, h = bmp.height; if (Math.min(w, h) < VIS_MIN_SIDE || w * h < 12000) { if (bmp.close) bmp.close(); return { small: 1 }; }
+  for (const [side, q] of [[VIS_SIDE, 0.85], [1100, 0.7], [800, 0.6]]) {
+    const k = Math.min(1, side / Math.max(w, h)), cv = document.createElement('canvas'); cv.width = Math.max(1, Math.round(w * k)); cv.height = Math.max(1, Math.round(h * k));
+    const cx = cv.getContext('2d', { alpha: false }); cx.fillStyle = '#fff'; cx.fillRect(0, 0, cv.width, cv.height); cx.drawImage(bmp, 0, 0, cv.width, cv.height);
+    const out = await new Promise((res) => cv.toBlob((b) => res(b), 'image/jpeg', q)); const ow = cv.width, oh = cv.height; cv.width = cv.height = 0;
+    if (out && out.size <= VIS_BYTES) { if (bmp.close) bmp.close(); return { blob: out, w: ow, h: oh }; }
+  }
+  if (bmp.close) bmp.close(); return { big: 1 };
+}
+/* items: [{ get: async () => Uint8Array, ext, unit, alt }]. Keeps real pictures, drops icons, logos that repeat on many slides, and anything over the limits. */
+async function collectVisuals(items, ctx) {
+  const skip = { small: 0, repeat: 0, big: 0, bad: 0, cap: 0 }, seen = {}, raw = [];
+  for (const it of items) {
+    if (ctx && ctx.cancelled && ctx.cancelled()) throw new Cancelled();
+    const mime = IMG_EXT[it.ext]; if (!mime) { skip.bad++; continue; }
+    let u8; try { u8 = await it.get(); } catch (e) { u8 = null; } if (!u8 || u8.length < VIS_MIN_BYTES) { skip.small++; continue; }
+    const hk = hashBytes(u8); (seen[hk] = seen[hk] || []).push({ it, u8, mime });
+  }
+  Object.keys(seen).forEach((k) => { const g = seen[k]; if (g.length >= 3) skip.repeat += g.length; else g.forEach((x) => raw.push(x)); });
+  raw.sort((a, b) => a.it.order - b.it.order); const out = []; let total = 0;
+  for (const x of raw) {
+    if (out.length >= VIS_MAX || total > VIS_TOTAL) { skip.cap++; continue; }
+    const r = await shrinkVisual(x.u8, x.mime); if (!r) { skip.bad++; continue; } if (r.small) { skip.small++; continue; } if (r.big) { skip.big++; continue; }
+    total += r.blob.size; out.push({ unit: x.it.unit, alt: clean(x.it.alt || '').slice(0, 300), blob: r.blob, w: r.w, h: r.h });
+  }
+  return { list: out, skip };
+}
+function visNote(kindWord, got, skip, hadAny) {
+  const n = got.length, miss = skip.small + skip.repeat + skip.big + skip.bad + skip.cap;
+  if (!hadAny) return '';
+  if (!n) return 'This ' + kindWord + ' has pictures, but none could be kept (they were too small, repeated on many pages, or not a picture type Knowvia can open).';
+  return n + (n === 1 ? ' picture was' : ' pictures were') + ' kept from this ' + kindWord + ' and can be shown beside the lesson.' + (miss ? ' ' + miss + ' more were skipped: small icons, logos that repeat, or over the size limit.' : '');
+}
+
 /* ---------------- Readers: each returns { title, units:[{t, cite, s?, m?}], chapters:[{title,from,to}], notes:[] } ---------------- */
 const R = {};
 
@@ -129,33 +186,37 @@ R.web = async (html, base) => {
   return { title, units: r.units, chapters: chapters.length >= 2 ? chapters : [], notes: [] };
 };
 
-R.docx = async (buf) => {
+R.docx = async (buf, ctx) => {
   const z = await unzip(buf), x = await z.text('word/document.xml'); if (!x) throw new SrcError('This Word file has no document text. It may be an older .doc file; save it as .docx and try again.', 'bad');
   const d = xml(x), body = d.getElementsByTagNameNS('*', 'body')[0]; if (!body) throw new SrcError('This Word file has no readable text.', 'empty');
-  const paras = [], heads = []; let docTitle = '';
+  const paras = [], heads = []; let docTitle = ''; const imgs = [], drel = await readRels(z, 'word/_rels/document.xml.rels');
   const ptext = (p) => { let s = ''; p.querySelectorAll ? null : null; const walk = (n) => { for (const c of Array.from(n.childNodes)) { const ln = c.localName; if (ln === 't') s += c.textContent; else if (ln === 'tab') s += ' '; else if (ln === 'br' || ln === 'cr') s += '\n'; else if (c.childNodes && ln !== 'instrText') walk(c); } }; walk(p); return s; };
   const doP = (p) => {
-    const t = clean(ptext(p)); if (!t) return;
+    const blips = byTag(p, '', 'blip'), dps = byTag(p, '', 'docPr'), marks = [];
+    blips.forEach((b, k) => { const r = drel[relId(b)]; if (!r || !/image$/.test(r.ty)) return; const path = relPath('word/document.xml', r.t); if (!path) return; imgs.push({ path, alt: dps[k] ? (dps[k].getAttribute('descr') || '') : '', ext: (path.split('.').pop() || '').toLowerCase(), order: imgs.length }); marks.push('\u0001IMG' + (imgs.length - 1) + '\u0001'); });
+    const t = clean(ptext(p)); if (!t) { if (marks.length) paras.push(marks.join('\n')); return; }
     const st = byTag(p, '', 'pStyle')[0], sv = st ? (st.getAttribute('w:val') || st.getAttribute('val') || '') : '';
-    const m = sv.match(/^(?:heading|Heading|Title)\s*([1-3])?$/);
-    if (m && /^title$/i.test(sv)) { paras.push('\n' + t); if (!docTitle) docTitle = t; } else if (m) { paras.push('\n' + t); heads.push({ t, lvl: +(m[1] || 1), idx: paras.length - 1 }); } else paras.push(byTag(p, '', 'numPr').length ? '• ' + t : t);
+    const m = sv.match(/^(?:heading|Heading|Title)\s*([1-3])?$/), mk = marks.length ? '\n' + marks.join('\n') : '';
+    if (m && /^title$/i.test(sv)) { paras.push('\n' + t + mk); if (!docTitle) docTitle = t; } else if (m) { paras.push('\n' + t + mk); heads.push({ t, lvl: +(m[1] || 1), idx: paras.length - 1 }); } else paras.push((byTag(p, '', 'numPr').length ? '• ' + t : t) + mk);
   };
   Array.from(body.childNodes).forEach((c) => {
     if (c.localName === 'p') doP(c);
     else if (c.localName === 'tbl') byTag(c, '', 'tr').forEach((tr) => { const cells = byTag(tr, '', 'tc').map((tcl) => clean(byTag(tcl, '', 'p').map(ptext).join(' '))); if (cells.some(Boolean)) paras.push(cells.join(' | ')); });
   });
   const units = chunkParas(paras, 2600).map((x2, i) => ({ t: x2, cite: 'section ' + (i + 1) }));
+  units.forEach((u, i) => { u.t = u.t.replace(/\u0001IMG(\d+)\u0001/g, (m0, k) => { if (imgs[+k]) imgs[+k].unit = i + 1; return ''; }).replace(/\n{3,}/g, '\n\n').trim(); });
   const lvl = heads.some((h) => h.lvl === 1) ? 1 : 2, chapters = [];
   heads.filter((h) => h.lvl <= lvl).forEach((h) => { const i = units.findIndex((u) => u.t.includes(h.t)); if (i >= 0 && !chapters.some((c) => c.from === i + 1)) chapters.push({ title: h.t.slice(0, 90), from: i + 1, to: i + 1 }); });
-  const notes = []; if (z.names.some((n) => /^word\/media\//.test(n))) notes.push('This document has pictures. Knowvia reads the text only, so pictures and diagrams are not included.');
+  const notes = [], vv = await collectVisuals(imgs.filter((x) => x.unit).map((x) => ({ get: () => z.get(x.path), ext: x.ext, unit: x.unit, alt: x.alt, order: x.order })), ctx);
+  const vn = visNote('document', vv.list, vv.skip, imgs.length > 0); if (vn) notes.push(vn);
   const ti = await z.text('docProps/core.xml'); let title = ''; if (ti) { const t = xml(ti).getElementsByTagNameNS('*', 'title')[0]; title = t ? clean(t.textContent) : ''; }
-  return { title: title || docTitle, units, chapters, notes };
+  return { title: title || docTitle, units, chapters, notes, visuals: vv.list };
 };
 
-R.pptx = async (buf) => {
+R.pptx = async (buf, ctx) => {
   const z = await unzip(buf), sl = z.names.filter((n) => /^ppt\/slides\/slide\d+\.xml$/.test(n)).sort((a, b) => +a.match(/\d+/)[0] - +b.match(/\d+/)[0]);
   if (!sl.length) throw new SrcError('This PowerPoint file has no slides Knowvia can read. If it is an old .ppt file, save it as .pptx and try again.', 'bad');
-  const units = [], titles = [], notes = []; let pics = 0, empty = 0;
+  const units = [], titles = [], notes = [], pitems = []; let pics = 0, empty = 0;
   for (let i = 0; i < sl.length; i++) {
     const d = xml(await z.text(sl[i])), lines = []; let title = '';
     byTag(d, '', 'sp').forEach((sp) => {
@@ -164,25 +225,27 @@ R.pptx = async (buf) => {
       if (isTitle && t.length && !title) title = t.join(' '); else lines.push(...t);
     });
     byTag(d, '', 'tr').forEach((tr) => { const cells = byTag(tr, '', 'tc').map((c) => clean(byTag(c, '', 't').map((x) => x.textContent).join(' '))); if (cells.some(Boolean)) lines.push(cells.join(' | ')); });
-    pics += byTag(d, '', 'pic').length;
-    const num = +sl[i].match(/(\d+)\.xml$/)[1], nx = await z.text('ppt/notesSlides/notesSlide' + num + '.xml');
+    const pl = byTag(d, '', 'pic'); pics += pl.length;
+    const num = +sl[i].match(/(\d+)\.xml$/)[1], srel = pl.length ? await readRels(z, 'ppt/slides/_rels/slide' + num + '.xml.rels') : {};
+    pl.forEach((pc) => { const bl = byTag(pc, '', 'blip')[0], r = bl && srel[relId(bl)]; if (!r || !/image$/.test(r.ty)) return; const path = relPath('ppt/slides/slide' + num + '.xml', r.t); if (!path) return; const cn = byTag(pc, '', 'cNvPr')[0]; pitems.push({ get: () => z.get(path), ext: (path.split('.').pop() || '').toLowerCase(), unit: i + 1, alt: cn ? (cn.getAttribute('descr') || '') : '', order: pitems.length }); });
+    const nx = await z.text('ppt/notesSlides/notesSlide' + num + '.xml');
     let note = ''; if (nx) note = clean(byTag(xml(nx), '', 't').map((x) => x.textContent).join(' ')).replace(/^\d+\s*$/, '');
     const t = (title ? title + '\n' : '') + lines.join('\n') + (note && note.length > 5 ? '\nSpeaker notes: ' + note : '');
     if (clean(t).length < 8) empty++;
     units.push({ t: clean(t) || '(This slide has no text. It may be only a picture.)', cite: 'slide ' + (i + 1) }); titles.push(title);
   }
-  if (pics) notes.push('This deck has ' + pics + ' picture' + (pics > 1 ? 's' : '') + '. Knowvia reads the words only, so images and diagrams are not included.');
+  const vv = await collectVisuals(pitems, ctx), vn = visNote('deck', vv.list, vv.skip, pics > 0); if (vn) notes.push(vn);
   if (empty > sl.length * 0.4) notes.push('Many slides have almost no text, so the course made from them may be thin. Pictures are not read.');
   const chapters = groupChapters(units.length, units.length > 40 ? 10 : 6, (a, b) => (titles[a - 1] || 'Slides ' + a + ' to ' + b) + (a === b ? '' : ''));
-  return { title: titles.find(Boolean) || '', units, chapters: units.length > 8 ? chapters : [], notes };
+  return { title: titles.find(Boolean) || '', units, chapters: units.length > 8 ? chapters : [], notes, visuals: vv.list };
 };
 
-R.xlsx = async (buf) => {
+R.xlsx = async (buf, ctx) => {
   const z = await unzip(buf), wb = await z.text('xl/workbook.xml'); if (!wb) throw new SrcError('This Excel file has no sheets Knowvia can read. If it is an old .xls file, save it as .xlsx and try again.', 'bad');
   const rels = await z.text('xl/_rels/workbook.xml.rels'), relMap = {}; if (rels) byTag(xml(rels), '', 'Relationship').forEach((r) => { relMap[r.getAttribute('Id')] = r.getAttribute('Target'); });
   const ss = []; const sx = await z.text('xl/sharedStrings.xml'); if (sx) byTag(xml(sx), '', 'si').forEach((si) => ss.push(clean(byTag(si, '', 't').map((t) => t.textContent).join(''))));
   const sheets = byTag(xml(wb), '', 'sheet').map((s) => ({ name: s.getAttribute('name'), rid: s.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id') || s.getAttribute('r:id') }));
-  const units = [], chapters = [], notes = []; let rowsTotal = 0, cut = false;
+  const units = [], chapters = [], notes = [], xitems = []; let rowsTotal = 0, cut = false, xpics = 0;
   const col = (ref) => { const m = String(ref).match(/^([A-Z]+)/); let n = 0; if (m) for (const ch of m[1]) n = n * 26 + ch.charCodeAt(0) - 64; return n - 1; };
   for (const sh of sheets) {
     let tgt = relMap[sh.rid] || ''; tgt = tgt.replace(/^\//, ''); const path = tgt.startsWith('xl/') ? tgt : 'xl/' + tgt; const sx2 = await z.text(path); if (!sx2) continue;
@@ -195,12 +258,21 @@ R.xlsx = async (buf) => {
     rowsTotal += use.length; const first = units.length + 1;
     for (let a = 0; a < use.length; a += 40) { const part = use.slice(a, a + 40); units.push({ t: (a ? 'Columns: ' + head + '\n' : '') + part.join('\n'), cite: sh.name + ' rows ' + (a + 1) + '-' + (a + part.length) }); }
     chapters.push({ title: 'Sheet: ' + sh.name, from: first, to: units.length });
+    try {
+      const srl = await readRels(z, path.replace(/worksheets\/([^/]+)$/, 'worksheets/_rels/$1.rels')), dr = Object.keys(srl).map((k) => srl[k]).find((r) => /drawing$/.test(r.ty));
+      if (dr) {
+        const dpath = relPath(path, dr.t), dx = await z.text(dpath);
+        if (dx) { const drel2 = await readRels(z, dpath.replace(/drawings\/([^/]+)$/, 'drawings/_rels/$1.rels'));
+          byTag(xml(dx), '', 'pic').forEach((pc) => { xpics++; const bl = byTag(pc, '', 'blip')[0], r = bl && drel2[relId(bl)]; if (!r || !/image$/.test(r.ty)) return; const ip = relPath(dpath, r.t); const cn = byTag(pc, '', 'cNvPr')[0]; xitems.push({ get: () => z.get(ip), ext: (ip.split('.').pop() || '').toLowerCase(), unit: first, alt: cn ? (cn.getAttribute('descr') || '') : '', order: xitems.length }); }); }
+      }
+    } catch (e) { /* pictures are optional */ }
     if (cut) break;
   }
   if (!units.length) throw new SrcError('These sheets are empty.', 'empty');
   if (cut) notes.push('This workbook is very large, so only the first 15,000 rows were read.');
+  const vv = await collectVisuals(xitems, ctx), vn = visNote('workbook', vv.list, vv.skip, xpics > 0); if (vn) notes.push(vn);
   notes.push('Excel files are read as tables of text. Formulas show their last saved results, and charts are not included.');
-  return { title: '', units, chapters, notes };
+  return { title: '', units, chapters, notes, visuals: vv.list };
 };
 
 R.epub = async (buf) => {
@@ -409,6 +481,11 @@ async function ingest(input, ctx) {
     if (keepFile) { await Store.putFile(sid, keepFile); src.hasFile = true; }
     if (photoBlobs) { for (let i = 0; i < photoBlobs.length; i++) await Store.putImg(sid, i + 1, photoBlobs[i]); src.hasFile = true; }
   } catch (e) { src.hasFile = false; src.notes.push('There was no room to keep the original file on this device, so pages cannot be read as images later.'); if (photoBlobs) { try { await Store.remove(sid); } catch (e2) { /* ignore */ } throw new SrcError('There is no room on this device to keep the photos. Free some space and try again.', 'nostore'); } }
+  const vis = (res.visuals || []).filter((v) => v && v.blob && v.unit >= 1 && v.unit <= units.length);
+  if (vis.length) {
+    try { for (let i = 0; i < vis.length; i++) await Store.putImg(sid, 'v' + (i + 1), vis[i].blob); src.vis = vis.map((v, i) => ({ id: 'v' + (i + 1), unit: v.unit, alt: v.alt || '', w: v.w, h: v.h, bytes: v.blob.size })); }
+    catch (e) { src.vis = []; src.notes = (src.notes || []).filter((n) => !/pictures? (was|were) kept/.test(n)); src.notes.push('There was no room to keep the pictures on this device, so only the text was kept.'); try { await Store.removeImgs(sid, 'v'); } catch (e2) { /* ignore */ } }
+  }
   await Store.put(src);
   if (photoBlobs) {
     try {
@@ -560,5 +637,39 @@ async function search(srcId, query, o) {
 }
 const unitText = async (srcId, from, to) => { const s = await Store.get(srcId); if (!s) return ''; return s.units.slice(from - 1, to).map((u) => '[' + u.cite + ']\n' + u.t).join('\n\n'); };
 
-window.KVSources = { KINDS, ACCEPT, LIMIT_MB, Store, ingest, search, unitText, readPages, vision, pageImage, attachFile, needsRead, youtube: { id: ytId, mmss }, errors: { Cancelled, SrcError }, detect, tools: { unzip, clean, tok, mathScore, buildIndex }, native };
+/* ---------------- Pictures kept from a source: show them, describe them (cloud, only when asked) ---------------- */
+const VURL = new Map();
+async function visBlob(srcId, vid) { return Store.getImg(srcId, vid); }
+async function visUrl(srcId, vid) {
+  const k = srcId + ':' + vid; if (VURL.has(k)) return VURL.get(k);
+  const b = await visBlob(srcId, vid); if (!b) return ''; const u = URL.createObjectURL(b); VURL.set(k, u); return u;
+}
+async function visData(srcId, vid) { const b = await visBlob(srcId, vid); return b ? blobUrl(b) : ''; }
+const visIn = (src, from, to) => (src.vis || []).filter((v) => v.unit >= from && v.unit <= to);
+const visLabel = (src, v) => { const u = src.units[v.unit - 1]; return u ? u.cite : 'this source'; };
+const visCaption = (src, v) => { const t = clean(v.desc || v.alt || ''); return t.length >= 12 ? t.slice(0, 300) : 'A picture from ' + visLabel(src, v) + ' of your source.'; };
+const DESC_SYS = 'You describe pictures from study material for a learner and for a tutor who cannot see them. For every picture write 1 or 2 plain sentences, under 280 characters, that say what it shows. Include any title, labels, numbers, axis names or steps you can actually read. If it is a chart, say what is compared and the main pattern. If it is a decorative photo or logo, say so in a few words. Never guess at things you cannot see. Reply in exactly this form, one block per picture, and nothing else:\n<<<PIC v1>>>\ndescription\n<<<PIC v2>>>\ndescription';
+async function describeVisuals(srcId, vids, ctx) {
+  ctx = ctx || {}; const src = await Store.get(srcId); if (!src) throw new SrcError('This source is not on this device.', 'bad');
+  const cands = vision.candidates(); if (!cands.length) throw new SrcError('Describing pictures needs a cloud model that can see images. Gemini has a free plan that works well: connect it in Me.', 'novision');
+  const todo = (src.vis || []).filter((v) => vids.includes(v.id) && !v.desc); let done = 0, ci = 0, lastErr = null;
+  for (let i = 0; i < todo.length; i += 3) {
+    if (ctx.signal && ctx.signal.aborted) throw new Cancelled();
+    const grp = todo.slice(i, i + 3); if (ctx.onProgress) ctx.onProgress({ msg: 'Looking at ' + (grp.length === 1 ? 'picture ' + (i + 1) : 'pictures ' + (i + 1) + ' to ' + (i + grp.length)) + ' of ' + todo.length, frac: done / todo.length });
+    const content = [{ type: 'text', text: 'Describe these ' + grp.length + ' picture' + (grp.length > 1 ? 's' : '') + '.' }];
+    for (const v of grp) { content.push({ type: 'text', text: 'Picture ' + v.id + (v.alt ? ' (its author labelled it: ' + v.alt.slice(0, 120) + ')' : '') + ':' }); content.push({ type: 'image_url', image_url: { url: await visData(srcId, v.id) } }); }
+    let out = null;
+    while (ci < cands.length && out === null) {
+      try { out = String(await window.KVApp.llm([{ role: 'system', content: DESC_SYS }, { role: 'user', content }], { model: cands[ci], max: 900, temp: 0.1, signal: ctx.signal, fast: true })); }
+      catch (e) { if (e && (e.name === 'AbortError' || e.name === 'Cancelled')) throw e; lastErr = e; ci++; }
+    }
+    if (out === null) throw new SrcError('No connected cloud model could look at the pictures' + (lastErr && lastErr.message ? ' (' + String(lastErr.message).slice(0, 120) + ')' : '') + '.', 'vis');
+    const parts = out.replace(/```[a-z]*\n?/gi, '').split(/<<<\s*PIC\s*(v\d+)\s*>>>/i);
+    for (let k = 1; k < parts.length; k += 2) { const v = grp.find((x) => x.id === parts[k].toLowerCase()), t = clean(parts[k + 1] || ''); if (v && t.length > 8) { v.desc = t.slice(0, 320); done++; } }
+    await Store.put(src);
+  }
+  return { described: done, asked: todo.length };
+}
+
+window.KVSources = { visUrl, visData, visIn, visCaption, visLabel, describeVisuals, KINDS, ACCEPT, LIMIT_MB, Store, ingest, search, unitText, readPages, vision, pageImage, attachFile, needsRead, youtube: { id: ytId, mmss }, errors: { Cancelled, SrcError }, detect, tools: { unzip, clean, tok, mathScore, buildIndex }, native };
 })();
