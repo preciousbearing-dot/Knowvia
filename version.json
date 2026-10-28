@@ -1,10 +1,9 @@
 {
-  "version": "0.21.0",
+  "version": "0.22.0",
   "min": "0.0.0",
   "notes": [
-    "New: Find on the web. Tell Amani what you want to learn and she searches for articles, YouTube lessons and PDFs, tells you which are worth your time, and lets you pick.",
-    "Pick several and Amani merges them into one course, ordered by topic, with every part marked with its source number.",
-    "Search uses your Gemini key when you have one. You can also add a free Brave or Tavily key in the search settings.",
-    "If a source cannot be read, the others still go into your course and Knowvia tells you which one failed and why."
+    "New: add files from Google Drive. Share a file or Google Doc, Sheet or Slides as Anyone with the link, paste the link, and Knowvia reads it.",
+    "Knowvia works out the file type by itself, so PDFs, Word, PowerPoint, Excel, EPUB, text and photos all work.",
+    "If a file is private or the link is a folder, Knowvia tells you exactly what to change."
   ]
 }

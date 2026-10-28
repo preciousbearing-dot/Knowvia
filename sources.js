@@ -397,10 +397,47 @@ async function httpBlob(url) {
     if (r.status >= 400) throw new SrcError('The site answered with an error (' + r.status + ').', 'http');
     const b64 = typeof r.data === 'string' ? r.data : ''; if (!b64) throw new SrcError('The file came back empty.', 'http');
     if (b64.length * 0.75 > cap) throw new SrcError('This file is too big (over ' + LIMIT_MB + ' MB).', 'big');
-    const bin = atob(b64), u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); return new Blob([u8], { type: 'application/pdf' });
+    const bin = atob(b64), u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); return new Blob([u8], { type: 'application/octet-stream' });
   }
   try { const r = await fetch(url, { mode: 'cors' }); if (!r.ok) throw new SrcError('The site answered with an error (' + r.status + ').', 'http'); const b = await r.blob(); if (b.size > cap) throw new SrcError('This file is too big (over ' + LIMIT_MB + ' MB).', 'big'); return b; }
   catch (e) { if (e instanceof SrcError) throw e; throw new SrcError('This file could not be downloaded here. It works in the Knowvia Android app.', 'cors'); }
+}
+/* ---------------- Google Drive: a file or Google Doc shared with "Anyone with the link" ---------------- */
+function driveParse(u) {
+  let x; try { u = String(u || '').trim(); x = new URL(/^https?:/i.test(u) ? u : 'https://' + u); } catch (e) { return null; }
+  const h = x.hostname.replace(/^www\./, '');
+  if (h === 'drive.google.com') {
+    if (/\/folders\//.test(x.pathname)) return { type: 'folder' };
+    const m = x.pathname.match(/\/file\/d\/([\w-]{10,})/), id = m ? m[1] : x.searchParams.get('id');
+    return id && /^[\w-]{10,}$/.test(id) ? { type: 'file', id } : null;
+  }
+  if (h === 'docs.google.com') { const m = x.pathname.match(/^\/(document|spreadsheets|presentation)\/d\/([\w-]{10,})/); if (m) return { type: m[1] === 'document' ? 'doc' : m[1] === 'spreadsheets' ? 'sheet' : 'slides', id: m[2] }; }
+  return null;
+}
+const driveUrl = (d) => d.type === 'doc' ? 'https://docs.google.com/document/d/' + d.id + '/export?format=docx' : d.type === 'sheet' ? 'https://docs.google.com/spreadsheets/d/' + d.id + '/export?format=xlsx' : d.type === 'slides' ? 'https://docs.google.com/presentation/d/' + d.id + '/export/pptx' : 'https://drive.usercontent.google.com/download?id=' + d.id + '&export=download&confirm=t';
+/* says what a downloaded blob really is, from its first bytes (Drive does not tell us the file name) */
+async function sniffExt(blob) {
+  const h = new Uint8Array(await blob.slice(0, 16).arrayBuffer()), at = (s) => s.split('').every((c, i) => h[i] === c.charCodeAt(0));
+  if (at('%PDF')) return 'pdf';
+  if (h[0] === 0x89 && at('\x89PNG')) return 'png';
+  if (h[0] === 0xff && h[1] === 0xd8) return 'jpg';
+  if (at('RIFF') && String.fromCharCode(h[8], h[9], h[10], h[11]) === 'WEBP') return 'webp';
+  if (h[0] === 0x50 && h[1] === 0x4b) { try { const names = (await unzip(await blob.arrayBuffer())).names; if (names.includes('word/document.xml')) return 'docx'; if (names.includes('ppt/presentation.xml')) return 'pptx'; if (names.includes('xl/workbook.xml')) return 'xlsx'; if (names.includes('META-INF/container.xml')) return 'epub'; } catch (e) { /* not an office file */ } return ''; }
+  const t = await blob.slice(0, 2000).text();
+  if (/^\s*<(!doctype|html)/i.test(t)) return 'html';
+  return t.indexOf('\ufffd') < 0 && t.indexOf('\u0000') < 0 ? 'txt' : '';
+}
+const DRIVE_PRIVATE = 'Google would not give this file out. In Drive, open the file, tap Share, set General access to "Anyone with the link" (Viewer), then paste the link again.';
+async function driveFile(d, ctx) {
+  if (!d) throw new SrcError('That does not look like a Google Drive or Google Docs link. Open the file in Drive, tap Share, then Copy link.', 'url');
+  if (d.type === 'folder') throw new SrcError('Folders cannot be opened without signing in. Open the folder, then share and paste the link of each file you want.', 'url');
+  ctx.progress('open', 0.06, 'Downloading from Google Drive');
+  let blob; try { blob = await httpBlob(driveUrl(d)); } catch (e) { if (e instanceof SrcError && e.code === 'http' && /\((401|403|404)\)/.test(e.message)) throw new SrcError(DRIVE_PRIVATE, 'private'); throw e; }
+  if (ctx.cancelled()) throw new Cancelled();
+  const ext = await sniffExt(blob);
+  if (ext === 'html') throw new SrcError(DRIVE_PRIVATE, 'private');
+  if (!ext) throw new SrcError('This Drive file is not a type Knowvia can read. It reads PDF, Word, PowerPoint, Excel, EPUB, text and photos. For a Google Doc, Sheet or Slides, paste its link directly.', 'type');
+  return new File([blob], 'Google Drive file.' + ext, { type: blob.type || '' });
 }
 const normUrl = (u) => { u = String(u || '').trim(); if (!u || /\s/.test(u)) return ''; if (!/^https?:\/\//i.test(u)) u = 'https://' + u; try { const x = new URL(u); return /\./.test(x.hostname) || x.hostname === 'localhost' ? x.toString() : ''; } catch (e) { return ''; } };
 const ytId = (u) => { try { const x = new URL(u); if (/youtu\.be$/.test(x.hostname)) return x.pathname.slice(1, 12); if (/youtube\.com$|youtube-nocookie\.com$/.test(x.hostname.replace(/^(www|m|music)\./, ''))) { if (x.searchParams.get('v')) return x.searchParams.get('v').slice(0, 11); const m = x.pathname.match(/\/(?:shorts|embed|live|v)\/([\w-]{11})/); if (m) return m[1]; } } catch (e) { /* not a url */ } return ''; };
@@ -454,6 +491,8 @@ async function ingest(input, ctx) {
   ctx = ctx || {}; const cancelled = () => !!(ctx.signal && ctx.signal.aborted); ctx.cancelled = cancelled;
   const prog = ctx.onProgress || (() => {}); ctx.progress = (stage, frac, msg, eta) => prog({ stage, frac, msg, eta });
   let kind = input.kind, res, name = '', url = '', bytes = 0, keepFile = null; const sid = uid(); let photoBlobs = null;
+  if (kind === 'web' && input.url && driveParse(input.url)) kind = 'drive';
+  if (kind === 'drive') { url = String(input.url || '').trim(); input = { kind: 'file', file: await driveFile(driveParse(url), ctx) }; kind = 'file'; if (!/^https?:/i.test(url)) url = 'https://' + url; }
   if (kind === 'file' && input.file && detect(input.file) === 'photo') { input = { kind: 'photos', files: [input.file] }; kind = 'photos'; }
   if (kind === 'photos') {
     const files = (input.files || []).filter((f) => f && (/^image\//.test(f.type) || detect(f) === 'photo')); if (!files.length) throw new SrcError('Choose at least one photo.', 'empty');
@@ -491,7 +530,8 @@ async function ingest(input, ctx) {
   if (chapters.length && chapters[0].from > 1) chapters[0].from = 1; if (chapters.length) chapters[chapters.length - 1].to = units.length;
   chapters = chapters.filter((c) => c.to >= c.from).map((c, i) => Object.assign(c, { id: 'c' + (i + 1) }));
   const ttl = clean(res.title) || clean(name).replace(/\.[a-z0-9]+$/i, '').replace(/_/g, ' ').split(/\s*--\s*/)[0].replace(/[-]+/g, ' ').replace(/\s+/g, ' ').trim() || (kind === 'text' ? clean(units[0].t.split('\n')[0]).slice(0, 60) : 'Untitled source');
-  const src = { id: sid, v: 2, kind, title: ttl.slice(0, 120), name, url, addedAt: Date.now(), bytes, units, chapters, notes: res.notes || [], extra: res.extra || null, scanned: !!res.scanned, hasFile: false, stats: { chars, units: units.length, math: units.filter((u) => u.m).length } };
+  const ttl2 = /^Google Drive file/.test(ttl) ? (clean((units[0].t || '').split('\n')[0]).replace(/^[#*\s]+/, '').slice(0, 70) || ttl) : ttl;
+  const src = { id: sid, v: 2, kind, title: ttl2.slice(0, 120), name, url, addedAt: Date.now(), bytes, units, chapters, notes: res.notes || [], extra: res.extra || null, scanned: !!res.scanned, hasFile: false, stats: { chars, units: units.length, math: units.filter((u) => u.m).length } };
   ctx.progress('save', photoBlobs ? 0.18 : 0.94, 'Saving on this device');
   try {
     if (keepFile) { await Store.putFile(sid, keepFile); src.hasFile = true; }
@@ -694,5 +734,5 @@ async function describeVisuals(srcId, vids, ctx) {
   return { described: done, asked: todo.length };
 }
 
-window.KVSources = { http: httpText, httpBlob, visUrl, visData, visIn, visCaption, visLabel, describeVisuals, KINDS, ACCEPT, LIMIT_MB, Store, ingest, search, unitText, readPages, vision, pageImage, attachFile, needsRead, youtube: { id: ytId, mmss }, errors: { Cancelled, SrcError }, detect, tools: { unzip, clean, tok, mathScore, buildIndex }, native };
+window.KVSources = { http: httpText, httpBlob, drive: { parse: driveParse, url: driveUrl, sniff: sniffExt },  visUrl, visData, visIn, visCaption, visLabel, describeVisuals, KINDS, ACCEPT, LIMIT_MB, Store, ingest, search, unitText, readPages, vision, pageImage, attachFile, needsRead, youtube: { id: ytId, mmss }, errors: { Cancelled, SrcError }, detect, tools: { unzip, clean, tok, mathScore, buildIndex }, native };
 })();
