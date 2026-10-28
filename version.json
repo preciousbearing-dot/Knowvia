@@ -1,9 +1,12 @@
 {
-  "version": "0.19.0",
+  "version": "0.20.0",
   "min": "0.0.0",
   "notes": [
-    "Tap any picture or diagram to open it full screen, then pinch or use the buttons to zoom.",
-    "Amani can now draw diagrams, key idea boxes and comparison boxes right in the chat, and use small formatting tags and collapsible hints.",
-    "Amani knows her full toolbox, including when she builds a course for you."
+    "Add pictures, Word, PowerPoint and Excel files and YouTube links with much less waiting. Lessons from photos now finish, and Amani tells you the real reason when one cannot.",
+    "Knowvia looks at what you add and suggests the best way to study it. Amani no longer ends every answer with a quiz.",
+    "Pictures in your Word, PowerPoint and Excel files now appear in lessons. Tap any picture or original page to see it full screen, or show one to Amani.",
+    "Amani can show real pictures from the web (free licences, with credit), draw function graphs, and show spreadsheet grids with highlighted cells.",
+    "If one cloud model runs out of free use, Knowvia switches to another you have connected and tells you.",
+    "Very long YouTube videos (over 10 hours) are now refused with a clear message instead of freezing the app."
   ]
 }

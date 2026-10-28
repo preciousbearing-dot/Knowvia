@@ -1159,3 +1159,10 @@ img.pgimg[data-act]{cursor:zoom-in}
 .fg-sh,.fg-sr,.fg-sc{background:var(--inset-bg);color:var(--muted);font-weight:600;text-align:center!important;font-size:.85em}.fg-sr{width:34px}
 .fg-sd.n{text-align:right}.fg-sd.f code{color:var(--accent)}
 .fg-sd.hot{background:color-mix(in srgb,var(--accent) 22%,transparent);box-shadow:inset 0 0 0 2px var(--accent);font-weight:700}
+
+/* web pictures: tap to load */
+.prose figure.pic.webpic .wp-box{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;padding:18px 14px;background:var(--inset-bg);box-shadow:inset 0 0 0 1px var(--line)}
+.wp-ic{font-size:30px;line-height:1;color:var(--accent);opacity:.85}.wp-t{margin:0;font-weight:600}.wp-s{margin:0;font-size:.85em;color:var(--muted)}.wp-msg{margin:0;font-size:.9em;color:var(--text);min-height:0}.wp-msg:empty{display:none}
+.wp-busy .wp-ic{animation:kvsk 1.2s ease-in-out infinite alternate}
+.wp-credit{font-size:.92em}.wp-credit a{color:inherit;text-decoration:underline}
+.prose figure.pic.webpic.wp-done .pic-box{padding:8px;background:#fff;box-shadow:0 1px 2px rgba(20,20,60,.12);display:block}
