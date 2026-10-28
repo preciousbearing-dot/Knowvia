@@ -7,7 +7,7 @@
 const REG = window.KVReg = window.KVReg || { screens: {}, acts: {}, ins: {}, hooks: {}, names: {}, ready: [] };
 ['screens', 'acts', 'ins', 'hooks', 'names'].forEach((k) => { REG[k] = REG[k] || {}; }); REG.ready = REG.ready || [];
 
-const TYPES = ['flow', 'matrix', 'gantt', 'network', 'cycle', 'tree', 'bars', 'versus'];
+const TYPES = ['flow', 'matrix', 'gantt', 'network', 'cycle', 'tree', 'bars', 'versus', 'plot', 'sheet'];
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const inl = (s) => esc(s).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,!?:;]|$)/g, '$1<em>$2</em>');
 const num = (s) => { const v = Number(String(s == null ? '' : s).replace(/,/g, '').trim()); return Number.isFinite(v) ? v : NaN; };
@@ -161,7 +161,112 @@ function versus(f) {
   return `<div class="fg-versus"><div class="fg-vh"><span class="${hl.trim()}">${inl(f.kv.left)}</span><span class="${hr.trim()}">${inl(f.kv.right)}</span></div>${rows}</div>`;
 }
 
-const DRAW = { flow, matrix, gantt, network, cycle, tree, bars, versus };
+
+/* ---------- plot: function graphs. The formula is read by our own small parser, never run as code ---------- */
+const FN1 = { sin: Math.sin, cos: Math.cos, tan: Math.tan, sqrt: Math.sqrt, abs: Math.abs, ln: Math.log, log: Math.log10, exp: Math.exp, asin: Math.asin, acos: Math.acos, atan: Math.atan, floor: Math.floor, ceil: Math.ceil };
+function compile(src) {
+  const s = String(src || '').replace(/^\s*(y|f\(x\))\s*=\s*/i, '').replace(/\*\*/g, '^').replace(/[×·]/g, '*').replace(/−/g, '-').toLowerCase();
+  need(s.length > 0 && s.length <= 80, 'a formula must be 1 to 80 characters');
+  const tk = []; let i = 0;
+  while (i < s.length) {
+    const c = s[i];
+    if (c === ' ') { i++; continue; }
+    let m;
+    if ((m = s.slice(i).match(/^(\d+\.?\d*|\.\d+)/))) { tk.push({ n: parseFloat(m[1]) }); i += m[1].length; }
+    else if ((m = s.slice(i).match(/^[a-z]+/))) { tk.push({ w: m[0] }); i += m[0].length; }
+    else if ('+-*/^(),'.indexOf(c) >= 0) { tk.push({ o: c }); i++; }
+    else throw new FigErr('the formula has a character the graph cannot read');
+    need(tk.length <= 80, 'the formula is too long');
+  }
+  let p = 0; const peek = () => tk[p];
+  const isStart = (t) => t && (t.n !== undefined || t.w !== undefined || t.o === '(');
+  function expr() { let a = term(); while (peek() && (peek().o === '+' || peek().o === '-')) { const o = tk[p++].o, b = term(), l = a; a = o === '+' ? (x) => l(x) + b(x) : (x) => l(x) - b(x); } return a; }
+  function term() {
+    let a = unary();
+    for (;;) {
+      const t = peek(); if (!t) break;
+      if (t.o === '*' || t.o === '/') { p++; const b = unary(), l = a; a = t.o === '*' ? (x) => l(x) * b(x) : (x) => l(x) / b(x); }
+      else if (isStart(t)) { const b = unary(), l = a; a = (x) => l(x) * b(x); }
+      else break;
+    }
+    return a;
+  }
+  function unary() { const t = peek(); if (t && t.o === '-') { p++; const a = unary(); return (x) => -a(x); } if (t && t.o === '+') { p++; return unary(); } return power(); }
+  function power() { const a = atom(); const t = peek(); if (t && t.o === '^') { p++; const b = unary(); return (x) => Math.pow(a(x), b(x)); } return a; }
+  function atom() {
+    const t = tk[p++]; need(t, 'the formula ends too early');
+    if (t.n !== undefined) return () => t.n;
+    if (t.o === '(') { const a = expr(); need(peek() && peek().o === ')', 'a bracket is not closed'); p++; return a; }
+    if (t.w === 'x') return (x) => x;
+    if (t.w === 'pi') return () => Math.PI;
+    if (t.w === 'e') return () => Math.E;
+    if (FN1[t.w]) { need(peek() && peek().o === '(', t.w + ' needs brackets'); p++; const a = expr(); need(peek() && peek().o === ')', 'a bracket is not closed'); p++; const f = FN1[t.w]; return (x) => f(a(x)); }
+    throw new FigErr('the graph does not know "' + (t.w || t.o) + '"');
+  }
+  const f = expr(); need(p === tk.length, 'the formula could not be read to the end');
+  return f;
+}
+const niceStep = (span) => { const raw = span / 6, mag = Math.pow(10, Math.floor(Math.log10(raw))), r = raw / mag; return (r < 1.5 ? 1 : r < 3.5 ? 2 : r < 7.5 ? 5 : 10) * mag; };
+const fmtN = (v) => { const r = Math.round(v * 1e6) / 1e6; return Math.abs(r) >= 10000 ? r.toLocaleString('en-US') : String(r); };
+function plot(f) {
+  const fns = []; ['fn', 'fn2', 'fn3'].forEach((k) => { if (f.kv[k]) fns.push({ src: f.kv[k], f: compile(f.kv[k]) }); });
+  need(fns.length >= 1, 'plot needs fn: followed by a formula in x');
+  const x0 = f.kv.xmin !== undefined ? num(f.kv.xmin) : -10, x1 = f.kv.xmax !== undefined ? num(f.kv.xmax) : 10;
+  need(Number.isFinite(x0) && Number.isFinite(x1) && x1 > x0 && x1 - x0 <= 100000, 'xmin and xmax must be numbers, with xmax larger');
+  const N = 300, xs = []; for (let i = 0; i <= N; i++) xs.push(x0 + (x1 - x0) * i / N);
+  const ys = fns.map((g) => xs.map((x) => { let y; try { y = g.f(x); } catch (e) { y = NaN; } return Number.isFinite(y) && Math.abs(y) < 1e9 ? y : NaN; }));
+  need(ys.some((a) => a.some((v) => !isNaN(v))), 'the formula gives no values in this range');
+  let y0 = f.kv.ymin !== undefined ? num(f.kv.ymin) : NaN, y1 = f.kv.ymax !== undefined ? num(f.kv.ymax) : NaN;
+  if (!Number.isFinite(y0) || !Number.isFinite(y1)) {
+    const all = [].concat(...ys).filter((v) => !isNaN(v)).sort((a, b) => a - b), lo = all[Math.floor(all.length * 0.02)], hi = all[Math.ceil(all.length * 0.98) - 1], pad = (hi - lo || 2) * 0.12;
+    if (!Number.isFinite(y0)) y0 = lo - pad; if (!Number.isFinite(y1)) y1 = hi + pad;
+  }
+  need(y1 > y0, 'ymin and ymax must be numbers, with ymax larger');
+  const W = 560, H = 340, L = 44, R = 14, T = 14, B = 30, pw = W - L - R, ph = H - T - B;
+  const X = (x) => L + (x - x0) / (x1 - x0) * pw, Y = (y) => T + (y1 - y) / (y1 - y0) * ph;
+  let grid = '', lab = '';
+  const sx = niceStep(x1 - x0), sy = niceStep(y1 - y0);
+  for (let v = Math.ceil(x0 / sx) * sx; v <= x1 + 1e-9; v += sx) { const px = X(v).toFixed(1); grid += `<line class="fg-gl" x1="${px}" y1="${T}" x2="${px}" y2="${T + ph}"/>`; lab += `<text class="fg-pt" x="${px}" y="${H - 10}" text-anchor="middle">${esc(fmtN(v))}</text>`; }
+  for (let v = Math.ceil(y0 / sy) * sy; v <= y1 + 1e-9; v += sy) { const py = Y(v).toFixed(1); grid += `<line class="fg-gl" x1="${L}" y1="${py}" x2="${L + pw}" y2="${py}"/>`; lab += `<text class="fg-pt" x="${L - 6}" y="${(+py + 4).toFixed(1)}" text-anchor="end">${esc(fmtN(v))}</text>`; }
+  let axes = '';
+  if (y0 <= 0 && y1 >= 0) axes += `<line class="fg-ax" x1="${L}" y1="${Y(0).toFixed(1)}" x2="${L + pw}" y2="${Y(0).toFixed(1)}"/>`;
+  if (x0 <= 0 && x1 >= 0) axes += `<line class="fg-ax" x1="${X(0).toFixed(1)}" y1="${T}" x2="${X(0).toFixed(1)}" y2="${T + ph}"/>`;
+  let paths = '';
+  ys.forEach((a, k) => {
+    let d = '', pen = false, prev = NaN;
+    a.forEach((y, i) => { if (isNaN(y) || y < y0 - (y1 - y0) * 3 || y > y1 + (y1 - y0) * 3) { pen = false; prev = NaN; return; } if (pen && Math.abs(y - prev) > (y1 - y0) * 1.5) pen = false; d += (pen ? 'L' : 'M') + X(xs[i]).toFixed(1) + ' ' + Y(y).toFixed(1); pen = true; prev = y; });
+    paths += `<path class="fg-cv fg-cv${k}" d="${d}"/>`;
+  });
+  let pts = '';
+  String(f.kv.points || '').split(';').map((x) => x.trim()).filter(Boolean).slice(0, 8).forEach((q) => {
+    const m = q.match(/^\(?\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*\)?$/); need(m, 'points look like (2, 5); (3, 0)');
+    const px = +m[1], py = +m[2]; if (px < x0 || px > x1 || py < y0 || py > y1) return;
+    pts += `<circle class="fg-pd" cx="${X(px).toFixed(1)}" cy="${Y(py).toFixed(1)}" r="5"/><text class="fg-pl" x="${(X(px) + 8).toFixed(1)}" y="${(Y(py) - 8).toFixed(1)}">(${esc(fmtN(px))}, ${esc(fmtN(py))})</text>`;
+  });
+  const key = fns.map((g, k) => `<span class="fg-pk"><i class="fg-pw fg-cv${k}"></i><code>y = ${esc(g.src.replace(/^\s*(y|f\(x\))\s*=\s*/i, ''))}</code></span>`).join('');
+  return `<div class="fg-plot"><svg class="fg-svg" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" focusable="false">${grid}${axes}<rect class="fg-fr" x="${L}" y="${T}" width="${pw}" height="${ph}"/>${paths}${pts}${lab}</svg><div class="fg-pkey">${key}</div></div>`;
+}
+
+/* ---------- sheet: a small spreadsheet grid with highlighted cells ---------- */
+const colName = (n) => { let s = ''; n++; while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); } return s; };
+const colIndex = (s) => { let n = 0; for (const ch of s) n = n * 26 + ch.charCodeAt(0) - 64; return n - 1; };
+function sheet(f) {
+  need(f.rows.length >= 1 && f.rows.length <= 14, 'sheet needs 1 to 14 rows');
+  const cols = Math.max(...f.rows.map((r) => r.parts.length)); need(cols >= 1 && cols <= 8, 'sheet needs 1 to 8 columns');
+  const hot = new Set(), hotRange = [];
+  String(f.kv.highlight || '').toUpperCase().split(/[,;]/).map((x) => x.trim()).filter(Boolean).slice(0, 12).forEach((t) => {
+    const m = t.match(/^([A-Z]{1,2})(\d{1,3})(?::([A-Z]{1,2})(\d{1,3}))?$/); need(m, 'highlight looks like B2 or C2:C5');
+    const a = [colIndex(m[1]), +m[2] - 1], b = m[3] ? [colIndex(m[3]), +m[4] - 1] : a;
+    for (let c = Math.min(a[0], b[0]); c <= Math.max(a[0], b[0]); c++) for (let r = Math.min(a[1], b[1]); r <= Math.max(a[1], b[1]); r++) hot.add(c + ',' + r);
+    hotRange.push(t);
+  });
+  const head = '<tr><th class="fg-sc"></th>' + Array.from({ length: cols }, (x, c) => `<th class="fg-sh">${colName(c)}</th>`).join('') + '</tr>';
+  const body = f.rows.map((r, ri) => `<tr><th class="fg-sr">${ri + 1}</th>` + Array.from({ length: cols }, (x, c) => { const v = r.parts[c] || ''; const isF = /^=/.test(v); return `<td class="fg-sd${hot.has(c + ',' + ri) ? ' hot' : ''}${isF ? ' f' : ''}${/^-?[\d.,]+%?$/.test(v) ? ' n' : ''}">${isF ? '<code>' + esc(v) + '</code>' : inl(v)}</td>`; }).join('') + '</tr>').join('');
+  const bar = f.kv.formula ? `<div class="fg-fb"><span class="fg-fx">fx</span><code>${esc(f.kv.formula)}</code>${f.kv.cell ? `<span class="fg-fc">in ${esc(f.kv.cell)}</span>` : ''}</div>` : '';
+  return `<div class="fg-sheet">${bar}<div class="fg-sw"><table class="fg-st">${head}${body}</table></div></div>`;
+}
+
+const DRAW = { plot, sheet, flow, matrix, gantt, network, cycle, tree, bars, versus };
 
 /* ---------- one figure on the page ---------- */
 let seq = 0;
@@ -173,7 +278,7 @@ function render(text) {
   const title = f.title ? `<p class="fig-title"><span class="fig-k">Figure</span> <span>${inl(f.title)}</span></p>` : '';
   const cap = f.caption ? `<p class="fig-cap">${inl(f.caption)}</p>` : '';
   if (!ok) return `<figure class="fig fig-off" data-fid="${id}">${title}${cap}</figure>`;
-  const big = f.type === 'network' || f.type === 'gantt' || f.type === 'cycle';
+  const big = f.type === 'network' || f.type === 'gantt' || f.type === 'cycle' || f.type === 'plot' || f.type === 'sheet';
   return `<figure class="fig fg-t-${f.type}" data-fid="${id}">${title}<div class="fig-vis" aria-hidden="true" data-ftype="${f.type}" data-act="fig-zoom" data-fid="${id}">${vis}</div>${cap}${big ? `<button type="button" class="fig-zoom" data-act="fig-zoom" data-fid="${id}" aria-label="Enlarge this figure">Enlarge</button>` : ''}</figure>`;
 }
 
