@@ -1328,7 +1328,7 @@ async function askTutor(shown, prompt, quote, pic) {
   const onChunk = (c) => { raw.v += c; reply.text = visibleText(raw.v); const n = live(); if (n) { n.innerHTML = reply.text ? botMd(reply.text, true) : '<span class="typing"><i></i><i></i><i></i></span>'; const m = $('#msgs'); if (m) m.scrollTop = m.scrollHeight; } };
   let ok = false;
   try {
-    if (pic) { if (!picCand) throw new Error('The picture could not be sent. Connect a cloud model that can see images in Me, then try again.'); onChunk(String(await window.KVApp.llm(payload, { model: picCand, max: 1800, temp: 0.4, signal: ctrl.signal, fast: true }))); }
+    if (pic) { if (!picCand) throw new Error('The picture could not be sent. Connect a cloud model that can see images in Me, then try again.'); onChunk(String(await window.KVApp.llm(payload, { noswitch: true, model: picCand, max: 1800, temp: 0.4, signal: ctrl.signal, fast: true }))); }
     else if (S.tutor.brain === 'local') await streamOllama(payload, onChunk, ctrl.signal);
     else await streamCloud(payload, onChunk, ctrl.signal);
     const sp = splitNext(raw.v);
@@ -1920,7 +1920,7 @@ function fallbackCopy(t) { const x = document.createElement('textarea'); x.value
 document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && $('#selpop')) { selHide(); } });
 
 /* ---------------- One-shot model call (used by Build a course) ---------------- */
-async function llm(messages, o) {
+async function llmOnce(messages, o) {
   o = o || {};
   const sel = o.model || { k: S.tutor.brain === 'local' ? 'local' : 'cloud', p: S.tutor.provider, m: activeModelName() };
   const sig = o.signal;
@@ -1943,6 +1943,44 @@ async function llm(messages, o) {
   /* a "strict" caller wants to know why nothing came back: ran out of room (often hidden thinking), blocked, or truly empty */
   if (o.strict && !String(txt0).trim()) { const e = new Error('empty answer'); e.empty = String((ch0 && (ch0.finish_reason || ch0.finishReason)) || 'unknown'); throw e; }
   return txt0;
+}
+
+/* Automatic model switching: when a cloud model is over its limit, overloaded, rejects the key or comes back empty, try the next connected cloud model and say so in plain words. */
+const COOL = {};
+function whyFailed(e) {
+  const m = (e && e.message) || String(e);
+  if (e && e.empty !== undefined) return { ms: 0, say: 'sent back nothing' };
+  if (/HTTP 429|quota|rate.?limit|RESOURCE_EXHAUSTED|too many requests/i.test(m)) return { ms: 5 * 60000, say: 'reached its usage limit' };
+  if (/HTTP 40[13]|invalid.*key|api key/i.test(m)) return { ms: 30 * 60000, say: 'did not accept its key' };
+  if (/HTTP (500|502|503|504|529)|overload|unavailable|timed out|timeout/i.test(m)) return { ms: 60000, say: 'is busy right now' };
+  return null;
+}
+function otherClouds(skip) {
+  const out = [];
+  PROV_TOP.concat(PROV_ALT).forEach((id) => { if (id === skip || out.some((x) => x.p === id)) return; const c = cloudCfg(id); if (!c.key || !c.ok) return; if ((COOL[id] || 0) > Date.now()) return; const m = c.model || (c.models || [])[0]; if (m) out.push({ k: 'cloud', p: id, m }); });
+  return out;
+}
+async function llm(messages, o) {
+  o = o || {};
+  const sel = o.model || { k: S.tutor.brain === 'local' ? 'local' : 'cloud', p: S.tutor.provider, m: activeModelName() };
+  if (sel.k !== 'cloud' || o.noswitch) return llmOnce(messages, o);
+  let cur = (COOL[sel.p] || 0) > Date.now() ? null : sel, tried = [sel.p], lastErr = null;
+  const queue = otherClouds(sel.p);
+  for (;;) {
+    if (!cur) { cur = queue.shift(); if (!cur) break; }
+    try { return await llmOnce(messages, Object.assign({}, o, { model: cur })); }
+    catch (e) {
+      if (e && e.name === 'AbortError') throw e;
+      const w = whyFailed(e); lastErr = e; if (!w) throw e;
+      if (w.ms) COOL[cur.p] = Date.now() + w.ms;
+      tried.push(cur.p); const nxt = queue.find((q) => !tried.includes(q.p));
+      if (!nxt) break;
+      const nm = (id) => (PROV[id] && PROV[id].name) || id;
+      toast(nm(cur.p) + ' ' + w.say + '. Switched to ' + nm(nxt.p) + ' so you can carry on.'); cur = nxt;
+    }
+  }
+  if (lastErr) { const e = new Error(lastErr.message + ' (All your connected cloud models were tried. Wait a few minutes, add another free model in Me, or use the offline tutor.)'); e.empty = lastErr.empty; e.code = lastErr.code; throw e; }
+  throw new Error('No cloud model is ready right now. Wait a few minutes or connect another in Me.');
 }
 function switchToOffline(auto) {
   const loc = localModelList(); if (!loc.length) return false;

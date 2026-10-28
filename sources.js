@@ -403,6 +403,7 @@ function transcriptUnits(segs, title) {
 }
 function parseCaptionJson(txt) { let j; try { j = JSON.parse(txt); } catch (e) { return null; } const segs = []; (j.events || []).forEach((ev) => { if (!ev.segs) return; const t = clean(ev.segs.map((x) => x.utf8 || '').join('').replace(/\n/g, ' ')); if (t) segs.push({ s: (ev.tStartMs || 0) / 1000, t }); }); return segs; }
 function parseCaptionXml(txt) { const d = xml(txt); const segs = []; Array.from(d.getElementsByTagName('text')).forEach((n) => { const t = clean(n.textContent.replace(/&#39;/g, "'")); if (t) segs.push({ s: parseFloat(n.getAttribute('start') || '0'), t }); }); return segs.length ? segs : null; }
+const YT_MAX_SECS = 10 * 3600, YT_MAX_CHARS = 1500000;
 async function youtube(url, prefLang) {
   const id = ytId(url); if (!id) throw new SrcError('This does not look like a YouTube video link. Paste the link from the Share button.', 'url');
   const ctxs = [
@@ -421,11 +422,14 @@ async function youtube(url, prefLang) {
     } catch (e) { lastErr = e instanceof SrcError ? e : new SrcError('YouTube could not be reached or changed how it works. You can paste the transcript instead: open the video, tap More, then Show transcript, copy it, and use Copied text.', 'yt'); }
   }
   if (!found || !found.tracks) throw lastErr || new SrcError('YouTube did not return a transcript.', 'yt');
+  const hrs = found.secs / 3600;
+  if (found.secs > YT_MAX_SECS) throw new SrcError('This video is about ' + (hrs >= 10 ? Math.round(hrs) : Math.round(hrs * 10) / 10) + ' hours long. That is too much for a phone to read in one go, and it could make Knowvia stop responding. Videos up to ' + (YT_MAX_SECS / 3600) + ' hours work. For a long course, add its parts one at a time (most long courses are split into lessons or playlists), or paste the part of the transcript you want using Copied text.', 'ytlong');
   const want = (prefLang || 'en').toLowerCase(), pick = found.tracks.find((t) => t.languageCode.toLowerCase() === want && t.kind !== 'asr') || found.tracks.find((t) => t.languageCode.toLowerCase().startsWith(want) && t.kind !== 'asr') || found.tracks.find((t) => t.languageCode.toLowerCase().startsWith(want)) || found.tracks.find((t) => t.kind !== 'asr') || found.tracks[0];
   let segs = null; const base = pick.baseUrl.replace(/&fmt=[^&]*/, '');
   try { segs = parseCaptionJson(await httpText(base + '&fmt=json3', { headers: { 'User-Agent': ctxs[1].ua } })); } catch (e) { segs = null; }
   if (!segs || !segs.length) { try { segs = parseCaptionXml(await httpText(base, { headers: { 'User-Agent': ctxs[1].ua } })); } catch (e) { segs = null; } }
   if (!segs || !segs.length) throw new SrcError('YouTube gave the caption list but no caption text. Paste the transcript using Copied text instead.', 'yt');
+  if (segs.length > 120000 || segs.reduce((n, g) => n + g.t.length, 0) > YT_MAX_CHARS) throw new SrcError('The transcript of this video is far too long to read on this device. Add the video in smaller parts, or paste the part you want using Copied text.', 'ytlong');
   const r = transcriptUnits(segs, found.title), notes = [];
   if (pick.kind === 'asr') notes.push('These are automatic captions, so names, accents and technical words may be wrong.');
   return { title: found.title || 'YouTube video', units: r.units, chapters: r.chapters, notes, extra: { videoId: id, author: found.author, lang: pick.languageCode, secs: found.secs } };
@@ -566,7 +570,7 @@ async function askVision(cand, nums, imgs, ctx) {
   imgs.forEach((u, i) => { content.push({ type: 'text', text: 'Page ' + nums[i] + ':' }); content.push({ type: 'image_url', image_url: { url: u } }); });
   const msgs = [{ role: 'system', content: VISION_SYS }, { role: 'user', content }], waits = [7000, 22000, 50000];
   for (let t = 0; ; t++) {
-    try { return parsePages(await a.llm(msgs, { model: cand, max: 2400 * nums.length + 1200, temp: 0.1, signal: ctx.signal, fast: true }), nums); }
+    try { return parsePages(await a.llm(msgs, { noswitch: true, model: cand, max: 2400 * nums.length + 1200, temp: 0.1, signal: ctx.signal, fast: true }), nums); }
     catch (e) {
       if (e && (e.name === 'AbortError' || e.name === 'Cancelled')) throw e;
       const m = String((e && e.message) || ''), limit = /HTTP (429|503|500|502|504)/.test(m) || /rate|quota|overload|busy|exhaust/i.test(m);
@@ -667,7 +671,7 @@ async function describeVisuals(srcId, vids, ctx) {
     for (const v of grp) { content.push({ type: 'text', text: 'Picture ' + v.id + (v.alt ? ' (its author labelled it: ' + v.alt.slice(0, 120) + ')' : '') + ':' }); content.push({ type: 'image_url', image_url: { url: await visData(srcId, v.id) } }); }
     let out = null;
     while (ci < cands.length && out === null) {
-      try { out = String(await window.KVApp.llm([{ role: 'system', content: DESC_SYS }, { role: 'user', content }], { model: cands[ci], max: 900, temp: 0.1, signal: ctx.signal, fast: true })); }
+      try { out = String(await window.KVApp.llm([{ role: 'system', content: DESC_SYS }, { role: 'user', content }], { noswitch: true, model: cands[ci], max: 900, temp: 0.1, signal: ctx.signal, fast: true })); }
       catch (e) { if (e && (e.name === 'AbortError' || e.name === 'Cancelled')) throw e; lastErr = e; ci++; }
     }
     if (out === null) throw new SrcError('No connected cloud model could look at the pictures' + (lastErr && lastErr.message ? ' (' + String(lastErr.message).slice(0, 120) + ')' : '') + '.', 'vis');
