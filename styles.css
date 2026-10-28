@@ -1166,3 +1166,20 @@ img.pgimg[data-act]{cursor:zoom-in}
 .wp-busy .wp-ic{animation:kvsk 1.2s ease-in-out infinite alternate}
 .wp-credit{font-size:.92em}.wp-credit a{color:inherit;text-decoration:underline}
 .prose figure.pic.webpic.wp-done .pic-box{padding:8px;background:#fff;box-shadow:0 1px 2px rgba(20,20,60,.12);display:block}
+
+/* find on the web */
+.find-hero{display:flex;align-items:center;gap:14px;width:100%;padding:16px 18px;border-radius:var(--r-md);text-align:left;color:var(--ink);margin:0 0 6px}
+.find-hero .ico{width:48px;height:48px;border-radius:15px;display:flex;align-items:center;justify-content:center;background:var(--accent-grad);color:var(--accent-fg);flex:none}
+.find-hero b{display:block;font-size:17px}.find-hero .s{display:block;font-size:13.5px;color:var(--muted);line-height:1.4;margin-top:2px}
+.find-card{max-height:88vh;overflow-y:auto}
+.find-list{display:flex;flex-direction:column;gap:8px;margin:10px 0}
+.find-r{display:flex;flex-direction:column;gap:2px;border-radius:var(--r-sm);border:1px solid var(--line);background:var(--inset-bg);padding:2px 4px 6px}
+.find-r.on{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}.find-r.weak{opacity:.72}
+.find-pick{display:flex;gap:12px;align-items:flex-start;text-align:left;width:100%;padding:10px 8px;color:inherit}
+.find-ck{flex:none;width:24px;height:24px;border-radius:8px;border:2px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;color:var(--accent-fg);margin-top:1px}
+.find-r.on .find-ck{background:var(--accent-grad);border-color:transparent}
+.find-pick b{display:block;line-height:1.3}.find-pick .s{display:block;font-size:13px;color:var(--muted);margin-top:2px}.find-pick .v{display:block;font-size:13.5px;margin-top:4px}
+.find-open{align-self:flex-start;margin:0 0 0 44px;font-size:13px;color:var(--accent-text);text-decoration:underline}
+.find-prog li small{display:block;color:var(--muted);font-size:12.5px;margin-top:2px}.find-prog li.bad{color:var(--text)}.find-prog i.bad{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#d9534f;color:#fff;font-size:11px;font-style:normal;font-weight:800}
+.bundle-list{margin:6px 0 8px;padding-left:20px}.bundle-list li{margin:5px 0}
+.find-pick{background:none;border:0;font:inherit;cursor:pointer}

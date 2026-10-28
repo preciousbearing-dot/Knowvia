@@ -1,1 +1,1 @@
-window.KV_VERSION = '0.20.0';
+window.KV_VERSION = '0.21.0';

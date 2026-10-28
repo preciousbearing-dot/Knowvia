@@ -17,11 +17,11 @@ const IC = {
   trash: '<path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/>'
 };
 const ic = (d, s, w) => A().ic(d, s, w);
-const KIND_ICO = { pdf: IC.file, docx: IC.file, pptx: IC.file, xlsx: IC.file, epub: IC.file, text: IC.clip, web: IC.link, youtube: IC.yt, photo: IC.photo };
+const KIND_ICO = { pdf: IC.file, docx: IC.file, pptx: IC.file, xlsx: IC.file, epub: IC.file, text: IC.clip, web: IC.link, youtube: IC.yt, photo: IC.photo, bundle: IC.search };
 const kname = (k) => (K().KINDS[k] || { name: 'Source' }).name;
 const ago = (t) => { const d = Math.round((Date.now() - t) / 60000); if (d < 2) return 'just now'; if (d < 60) return d + ' minutes ago'; const h = Math.round(d / 60); if (h < 24) return h + ' hours ago'; const dd = Math.round(h / 24); return dd < 2 ? 'yesterday' : dd + ' days ago'; };
 const num = (n) => Number(n).toLocaleString('en-US');
-const unitWord = (k, n) => ({ pdf: 'page', pptx: 'slide', xlsx: 'block', youtube: 'segment', photo: 'photo' }[k] || 'section') + (n === 1 ? '' : 's');
+const unitWord = (k, n) => ({ pdf: 'page', pptx: 'slide', xlsx: 'block', youtube: 'segment', photo: 'photo', bundle: 'part' }[k] || 'section') + (n === 1 ? '' : 's');
 const mb = (b) => b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
 const etaTxt = (s) => { s = +s || 0; if (!s) return ''; if (s < 90) return 'about ' + s + ' seconds left'; const m = Math.round(s / 60); return 'about ' + m + ' minutes left'; };
 
@@ -48,7 +48,7 @@ function makePack(src, mode) {
     return { id: 'm' + (ci + 1), title: c.title, lessons: w.map((r, k) => { li++; return { id: 'l' + li, title: w.length > 1 ? 'Part ' + (k + 1) + ' of ' + w.length : c.title, subtitle: span(src, r[0], r[1]), minutes: 8, outcomes: [], body: 'This lesson covers **' + span(src, r[0], r[1]) + '** of your source. Amani writes it from your own material when you prepare it.', src: { from: r[0], to: r[1] }, ready: false }; }) };
   });
   const lessons = modules.reduce((a, m) => a + m.lessons.length, 0), mins = Math.round(src.stats.chars / 1100);
-  return { formatVersion: 1, id: packIdOf(src.id), title: src.title, subtitle: 'From your own ' + kname(src.kind).toLowerCase() + '. Written by Amani from your material.', level: 'Your source', language: 'en', version: '1.0.0', estimatedHours: Math.max(0.5, Math.round(mins / 6) / 10), outcome: 'Understand and use what is in ' + src.title + '.', author: 'Built by Amani from your own source', origin: 'upload', source: { id: src.id, kind: src.kind, title: src.title }, quality: { researched: false, factChecked: 'Written only from your source text. Check anything important in the original.' }, mode: mode || '', modules, quiz: [], flashcards: [], sources: '# Your source\n\n**' + esc(src.title) + '**\n\n' + kname(src.kind) + ', added ' + new Date(src.addedAt).toDateString() + '.' + (src.url ? '\n\n' + src.url : '') };
+  return { formatVersion: 1, id: packIdOf(src.id), title: src.title, subtitle: src.kind === 'bundle' ? 'Built by Amani from ' + ((src.extra && src.extra.parts) || []).length + ' sources you chose, ordered by topic.' : 'From your own ' + kname(src.kind).toLowerCase() + '. Written by Amani from your material.', level: 'Your source', language: 'en', version: '1.0.0', estimatedHours: Math.max(0.5, Math.round(mins / 6) / 10), outcome: 'Understand and use what is in ' + src.title + '.', author: 'Built by Amani from your own source', origin: 'upload', source: { id: src.id, kind: src.kind, title: src.title }, quality: { researched: false, factChecked: 'Written only from your source text. Check anything important in the original.' }, mode: mode || '', modules, quiz: [], flashcards: [], sources: src.kind === 'bundle' ? '# Your sources\n\n' + ((src.extra && src.extra.parts) || []).map((q) => q.n + '. **' + esc(q.title) + '** (' + q.kind + ')' + (q.url ? '\n   ' + q.url : '')).join('\n') : '# Your source\n\n**' + esc(src.title) + '**\n\n' + kname(src.kind) + ', added ' + new Date(src.addedAt).toDateString() + '.' + (src.url ? '\n\n' + src.url : '') };
 }
 async function ensurePack(src) {
   const a = A(); let p = a.PACKS.find((x) => x.id === packIdOf(src.id));
@@ -139,9 +139,10 @@ function srcRow(m) {
 REG.screens.mysources = function () {
   const a = A(), list = K().Store.list();
   return `<div class="page srcs"><div class="lib-top"><h1 class="h-title">Your own sources</h1><p class="lede">Add something you want to learn from. Amani reads it, builds a study path chapter by chapter, and answers from it with page references.</p></div>
-    <h2 class="sec-title">Add a source</h2>
+    <button type="button" class="find-hero raised kv-in" data-act="find-open"><span class="ico">${ic(IC.search, 24, 1.9)}</span><span class="grow"><b>Find on the web</b><span class="s">Tell Amani what you want to learn. She finds articles, videos and PDFs, and can merge several into one course.</span></span>${ic(a.I.chev, 18, 2)}</button>
+    <h2 class="sec-title">Or add a source yourself</h2>
     <div class="tiles">${tile('file', IC.file, 'File', 'PDF, Word, PowerPoint, Excel, EPUB, text', 1)}${tile('youtube', IC.yt, 'YouTube link', 'A video that has captions.', 2)}${tile('web', IC.link, 'Website', 'An article or a page.', 3)}${tile('text', IC.clip, 'Copied text', 'Paste notes or any text.', 4)}${tile('photos', IC.photo, 'Photos of pages', 'Camera or gallery. Maths too.', 5)}<div class="tile raised soon kv-in" style="--d:6" aria-disabled="true"><span class="ico">${ic(IC.drive, 22, 1.8)}</span><b>Google Drive</b><span class="s">Coming later</span></div></div>
-    <p class="help srcs-soon">Coming later: Google Drive and finding sources on the web.</p>
+    <p class="help srcs-soon">Coming later: Google Drive.</p>
     <h2 class="sec-title">Your sources</h2>
     ${list.length ? `<div class="srclist">${list.map(srcRow).join('')}</div>` : `<div class="shelf-empty inset">Nothing here yet. Choose one of the options above to add your first source. <b>Your files stay on this device.</b></div>`}
   </div>`;
@@ -284,6 +285,7 @@ REG.screens.source = function (route) {
     <p class="lede">${num(src.units.length)} ${word} · ${num(chs.filter((c) => !c.front).length || 1)} ${(chs.filter((c) => !c.front).length || 1) === 1 ? 'chapter' : 'chapters'} · ${num(Math.round(src.stats.chars / 5))} words · added ${ago(src.addedAt)}${src.url ? ' · <a href="' + esc(src.url) + '" target="_blank" rel="noopener">original</a>' : ''}</p></div>
     ${notes}
     ${visPanel(src)}
+    ${bundleCard(src)}
     ${profCard(src)}
     <div class="row-actions"><button class="btn primary" data-act="src-study" data-id="${id}">${ic(a.I.spark, 18, 2)}Study this</button><button class="btn" data-act="src-ask" data-id="${id}">${ic(a.I.chat, 18, 2)}Ask Amani about it</button></div>
     <label class="lsearch inset">${ic(IC.search, 18, 2)}<input id="src-q" type="search" placeholder="Search inside this source" autocomplete="off" aria-label="Search inside this source" data-id="${id}"></label>
@@ -292,6 +294,10 @@ REG.screens.source = function (route) {
     <div class="row-actions" style="margin-top:6px"><button class="btn" data-act="nav" data-r="source/${id}/1">Read the ${src.kind === 'pdf' ? 'pages' : 'text'}</button><button class="btn" data-act="src-del" data-id="${id}">${ic(IC.trash, 18, 2)}Remove</button></div>
     ${pack ? '' : ''}</div>`;
 };
+function bundleCard(src) {
+  const ps = (src.extra && src.extra.parts) || []; if (src.kind !== 'bundle' || !ps.length) return '';
+  return `<section class="vis pn-strong"><h3>Sources in this course</h3><ol class="bundle-list">${ps.map((q) => `<li><b>${esc(q.title)}</b><span class="s"> ${esc(q.kind)}${q.site ? ' · ' + esc(q.site) : ''}${/^https?:\/\//.test(q.url) ? ' · <a href="' + esc(q.url) + '" target="_blank" rel="noopener noreferrer">open</a>' : ''}</span></li>`).join('')}</ol><p class="help">Each part of a lesson is marked with its source number, like [2] 05:10.</p></section>`;
+}
 function chBadge(src, c) { let n = 0; for (let i = c.from; i <= c.to; i++) if (K().needsRead(src, src.units[i - 1])) n++; return n ? ' · ' + n + (src.scanned || src.kind === 'photo' ? ' to read' : ' maths ' + (n === 1 ? 'page' : 'pages')) : ''; }
 let sq = 0;
 document.addEventListener('input', (ev) => {
@@ -373,6 +379,7 @@ function lessonPrompt(src, l, text, hasMath) {
     '- Include one block ":::keyidea" (one or two sentences), at least one worked example from the source as ":::example title=Name", and one ":::exercise title=Name" with a task for the learner. A block is a line starting with ::: and its type, then the text, then a line containing only :::.\n' +
     (hasMath ? '- Pages marked [MATHS MAY BE GARBLED] have unreadable matrices, fractions or symbols. Do not guess them. Explain the idea in words and tell the learner to check that page in the book.\n' : '') +
     (/\[Picture v\d+ /.test(text) ? '- The source has pictures, listed at the end as [Picture v1 on slide 2: label]. You cannot see them. Where one supports a point, put it on its own line right after that paragraph as ![what it shows](kvsrc:v1), using only ids that are listed and each at most once. Describe a picture only with the words in its label, and say so when a label is missing. Never invent what a picture shows.\n' : '') +
+    (src.kind === 'bundle' ? '- This text mixes several numbered sources: ' + ((src.extra && src.extra.parts) || []).map((q) => q.n + ' = ' + String(q.title).slice(0, 60)).join('; ') + '. Labels start with the source number, like [2] 05:10. Keep that label exactly. Blend the sources into one clear explanation. If two sources disagree, say so and name both numbers.\n' : '') +
     '- If this part is mostly exercises, teach how to approach each type of question and solve the clearest examples step by step.\n- Write 500 to 900 words, or less if the source is short. No introductions about yourself.';
   return [{ role: 'system', content: sys }, { role: 'user', content: 'SOURCE TEXT:\n\n' + text }];
 }

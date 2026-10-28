@@ -1,12 +1,10 @@
 {
-  "version": "0.20.0",
+  "version": "0.21.0",
   "min": "0.0.0",
   "notes": [
-    "Add pictures, Word, PowerPoint and Excel files and YouTube links with much less waiting. Lessons from photos now finish, and Amani tells you the real reason when one cannot.",
-    "Knowvia looks at what you add and suggests the best way to study it. Amani no longer ends every answer with a quiz.",
-    "Pictures in your Word, PowerPoint and Excel files now appear in lessons. Tap any picture or original page to see it full screen, or show one to Amani.",
-    "Amani can show real pictures from the web (free licences, with credit), draw function graphs, and show spreadsheet grids with highlighted cells.",
-    "If one cloud model runs out of free use, Knowvia switches to another you have connected and tells you.",
-    "Very long YouTube videos (over 10 hours) are now refused with a clear message instead of freezing the app."
+    "New: Find on the web. Tell Amani what you want to learn and she searches for articles, YouTube lessons and PDFs, tells you which are worth your time, and lets you pick.",
+    "Pick several and Amani merges them into one course, ordered by topic, with every part marked with its source number.",
+    "Search uses your Gemini key when you have one. You can also add a free Brave or Tavily key in the search settings.",
+    "If a source cannot be read, the others still go into your course and Knowvia tells you which one failed and why."
   ]
 }

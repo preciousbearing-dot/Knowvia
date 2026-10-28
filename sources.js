@@ -5,7 +5,7 @@
 const native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 const KINDS = {
   pdf: { name: 'PDF', unit: 'page' }, docx: { name: 'Word document', unit: 'section' }, pptx: { name: 'PowerPoint', unit: 'slide' }, xlsx: { name: 'Excel sheet', unit: 'rows' },
-  epub: { name: 'EPUB book', unit: 'section' }, photo: { name: 'Photos of pages', unit: 'photo' }, text: { name: 'Text', unit: 'part' }, web: { name: 'Website', unit: 'part' }, youtube: { name: 'YouTube video', unit: 'time' }
+  epub: { name: 'EPUB book', unit: 'section' }, photo: { name: 'Photos of pages', unit: 'photo' }, text: { name: 'Text', unit: 'part' }, web: { name: 'Website', unit: 'part' }, youtube: { name: 'YouTube video', unit: 'time' }, bundle: { name: 'Course from several sources', unit: 'part' }
 };
 const EXT = { pdf: 'pdf', docx: 'docx', pptx: 'pptx', xlsx: 'xlsx', epub: 'epub', txt: 'text', md: 'text', markdown: 'text', csv: 'text', tsv: 'text', json: 'text', html: 'web', htm: 'web', rtf: 'text', log: 'text', jpg: 'photo', jpeg: 'photo', png: 'photo', webp: 'photo', heic: 'photo' };
 const ACCEPT = '.pdf,.docx,.pptx,.xlsx,.epub,.txt,.md,.csv,.html,.htm,.json,.jpg,.jpeg,.png,.webp';
@@ -390,6 +390,18 @@ async function httpText(url, o) {
   try { const r = await fetch(url, { method: o.method || 'GET', headers: o.headers, body: o.body, mode: 'cors' }); if (!r.ok) throw new SrcError('The site answered with an error (' + r.status + ').', 'http'); return await r.text(); }
   catch (e) { if (e instanceof SrcError) throw e; throw new SrcError(native ? 'The page could not be reached. Check your internet.' : 'This browser is not allowed to open other websites. It works in the Knowvia Android app and the desktop app. Here, open the page, copy its text, and use Copied text.', 'cors'); }
 }
+async function httpBlob(url) {
+  const cap = LIMIT_MB * 1048576;
+  if (native && CH()) {
+    const r = await CH().request({ url, method: 'GET', responseType: 'blob', connectTimeout: 20000, readTimeout: 90000 });
+    if (r.status >= 400) throw new SrcError('The site answered with an error (' + r.status + ').', 'http');
+    const b64 = typeof r.data === 'string' ? r.data : ''; if (!b64) throw new SrcError('The file came back empty.', 'http');
+    if (b64.length * 0.75 > cap) throw new SrcError('This file is too big (over ' + LIMIT_MB + ' MB).', 'big');
+    const bin = atob(b64), u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); return new Blob([u8], { type: 'application/pdf' });
+  }
+  try { const r = await fetch(url, { mode: 'cors' }); if (!r.ok) throw new SrcError('The site answered with an error (' + r.status + ').', 'http'); const b = await r.blob(); if (b.size > cap) throw new SrcError('This file is too big (over ' + LIMIT_MB + ' MB).', 'big'); return b; }
+  catch (e) { if (e instanceof SrcError) throw e; throw new SrcError('This file could not be downloaded here. It works in the Knowvia Android app.', 'cors'); }
+}
 const normUrl = (u) => { u = String(u || '').trim(); if (!u || /\s/.test(u)) return ''; if (!/^https?:\/\//i.test(u)) u = 'https://' + u; try { const x = new URL(u); return /\./.test(x.hostname) || x.hostname === 'localhost' ? x.toString() : ''; } catch (e) { return ''; } };
 const ytId = (u) => { try { const x = new URL(u); if (/youtu\.be$/.test(x.hostname)) return x.pathname.slice(1, 12); if (/youtube\.com$|youtube-nocookie\.com$/.test(x.hostname.replace(/^(www|m|music)\./, ''))) { if (x.searchParams.get('v')) return x.searchParams.get('v').slice(0, 11); const m = x.pathname.match(/\/(?:shorts|embed|live|v)\/([\w-]{11})/); if (m) return m[1]; } } catch (e) { /* not a url */ } return ''; };
 const mmss = (s) => { s = Math.max(0, Math.round(s)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(x).padStart(2, '0'); };
@@ -682,5 +694,5 @@ async function describeVisuals(srcId, vids, ctx) {
   return { described: done, asked: todo.length };
 }
 
-window.KVSources = { visUrl, visData, visIn, visCaption, visLabel, describeVisuals, KINDS, ACCEPT, LIMIT_MB, Store, ingest, search, unitText, readPages, vision, pageImage, attachFile, needsRead, youtube: { id: ytId, mmss }, errors: { Cancelled, SrcError }, detect, tools: { unzip, clean, tok, mathScore, buildIndex }, native };
+window.KVSources = { http: httpText, httpBlob, visUrl, visData, visIn, visCaption, visLabel, describeVisuals, KINDS, ACCEPT, LIMIT_MB, Store, ingest, search, unitText, readPages, vision, pageImage, attachFile, needsRead, youtube: { id: ytId, mmss }, errors: { Cancelled, SrcError }, detect, tools: { unzip, clean, tok, mathScore, buildIndex }, native };
 })();
